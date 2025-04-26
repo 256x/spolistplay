@@ -77,7 +77,7 @@ export SPOTIPY_REDIRECT_URI='https://127.0.0.1/'
     ```
 
 3.  初回実行時には、ブラウザが開きSpotifyアカウントへのアクセス許可を求められます。承認してください。承認後、ブラウザのアドレスバーに表示されるURLにリダイレクトされます。このURLをターミナルに貼り付けてEnterを押すように求められる場合があります（Redirect URIの設定やブラウザの挙動によります）。
-4.  認証が完了すると、検索プロンプトが表示されます。再生したいプレイリストのキーワードを入力してEnterを押します。
+4.  認証が完了すると、検索プロンプトが表示されます。再生したいプレイリストのキーワードを入力してEnterを押します。**自分のプレイリストを検索したい場合は、「0」を入力してください。**
 
     ```
     - spotify playlist player
@@ -207,7 +207,7 @@ export SPOTIPY_REDIRECT_URI='https://127.0.0.1/'
     ```
 
 3.  The first time you run it, a browser window will open asking for permission to access your Spotify account. Authorize it. After authorization, you may be redirected to a URL in your browser's address bar. You might be prompted to paste this URL back into the terminal and press Enter (this depends on your Redirect URI settings and browser behavior).
-4.  Once authentication is complete, a search prompt will appear. Enter keywords for the playlist you want to find and press Enter.
+4.  Once authentication is complete, a search prompt will appear. Enter keywords for the playlist you want to find and press Enter. **If you want to search for your own playlists, enter "0".**
 
     ```
     - spotify playlist player
