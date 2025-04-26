@@ -120,7 +120,7 @@ def process_playlist(playlist):
 
         print(f"Found {len(tracks)} tracks in the playlist.")
 
-        start_playback_loop(tracks)
+        start_playback_loop(tracks, playlist_info=playlist)
 
     except Exception as e:
         logging.error(f"Error processing playlist: {e}", exc_info=True)
@@ -191,9 +191,9 @@ def display_current_track(playback_state):
     if current_track_id != last_played_track_id:
         pass
     elif last_played_track_id is None and current_track_id is not None:
-         pass
+        pass
     else:
-         return
+        return
 
     if playback_state and playback_state.get('item'):
         item = playback_state['item']
@@ -207,9 +207,8 @@ def display_current_track(playback_state):
         print(f"󰀥  {album} ({year})\n", flush=True)
 
         last_played_track_id = current_track_id
-    # else ブロックは表示しないため削除
 
-def start_playback_loop(tracks):
+def start_playback_loop(tracks, playlist_info=None):
     global current_device_id, current_track_chunks, current_chunk_index, last_played_track_id
 
     device_id = select_device()
@@ -227,14 +226,17 @@ def start_playback_loop(tracks):
 
     clear_screen()
 
+    if playlist_info:
+        print(f"[ playlist : {playlist_info['name']} by {playlist_info['owner']['display_name']} ]\n")
+
     try:
         shuffle_state = True
         try:
-             sp.shuffle(state=shuffle_state, device_id=device_id)
-             logging.info("Shuffle enabled.")
+            sp.shuffle(state=shuffle_state, device_id=device_id)
+            logging.info("Shuffle enabled.")
         except Exception as e:
-             logging.warning(f"Could not set initial shuffle state: {e}")
-             print(f"Warning: Could not enable shuffle: {e}", flush=True)
+            logging.warning(f"Could not set initial shuffle state: {e}")
+            print(f"Warning: Could not enable shuffle: {e}", flush=True)
 
         if not play_track_chunk(current_track_chunks[current_chunk_index], device_id):
             print("Failed to start playback for the first chunk.", flush=True)
@@ -261,17 +263,17 @@ def start_playback_loop(tracks):
 
                 sleep_duration = POLLING_INTERVAL - (time.time() - last_polling_time)
                 if sleep_duration > 0:
-                     time.sleep(sleep_duration)
+                    time.sleep(sleep_duration)
 
             except Exception as e:
                 logging.error(f"Error in playback loop polling/processing: {e}", exc_info=True)
                 print(f"\n[Error] An error occurred: {e}", flush=True)
                 if "token" in str(e).lower() or "device" in str(e).lower():
-                     print("Stopping playback loop due to critical error.", flush=True)
-                     break
+                    print("Stopping playback loop due to critical error.", flush=True)
+                    break
                 else:
-                     print("Stopping playback loop due to unexpected error.", flush=True)
-                     break
+                    print("Stopping playback loop due to unexpected error.", flush=True)
+                    break
 
     except KeyboardInterrupt:
         print("\nCtrl+C detected. Stopping playback.", flush=True)
@@ -279,7 +281,7 @@ def start_playback_loop(tracks):
     finally:
         try:
             if current_device_id:
-                 sp.pause_playback(device_id=current_device_id)
+                sp.pause_playback(device_id=current_device_id)
         except Exception as e:
             logging.warning(f"Could not pause playback on exit: {e}")
 
@@ -327,9 +329,9 @@ def main():
 
             playlists = search_playlists(query)
             if not playlists:
-                 print(f"No playlists found for '{query}'.")
-                 input("Press Enter to continue...")
-                 continue
+                print(f"No playlists found for '{query}'.")
+                input("Press Enter to continue...")
+                continue
 
             selected = select_playlist(playlists)
             if selected:
@@ -341,8 +343,8 @@ def main():
             print("\nCtrl+C detected. Exiting program.")
             break
         except SystemExit:
-             print("Program exiting.")
-             break
+            print("Program exiting.")
+            break
         except Exception as e:
             logging.error(f"Unhandled error in main loop: {e}", exc_info=True)
             print(f"\nAn unexpected error occurred: {e}")
