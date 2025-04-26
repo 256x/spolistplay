@@ -23,7 +23,7 @@ if not CLIENT_ID or not CLIENT_SECRET or not REDIRECT_URI:
     exit()
 
 # OAuth authentication setup
-scope = "user-read-playback-state,user-modify-playback-state,user-read-currently-playing"
+scope = "user-read-playback-state,user-modify-playback-state,user-read-currently-playing,playlist-read-private,playlist-read-collaborative"
 auth_manager = SpotifyOAuth(client_id=CLIENT_ID,
                             client_secret=CLIENT_SECRET,
                             redirect_uri=REDIRECT_URI,
@@ -38,6 +38,23 @@ current_device_id = None
 current_track_chunks = []
 current_chunk_index = 0
 
+def get_user_playlists(limit=50):
+    try:
+        playlists = []
+        offset = 0
+        while True:
+            results = sp.current_user_playlists(limit=limit, offset=offset)
+            items = results['items']
+            if not items:
+                break
+            playlists.extend(items)
+            offset += limit
+        logging.info(f"Retrieved {len(playlists)} user playlists.")
+        return playlists
+    except Exception as e:
+        logging.error(f"Error while retrieving user playlists: {e}")
+        return []
+
 def search_playlists(query, limit=30):
     try:
         result = sp.search(q=query, type='playlist', limit=limit)
@@ -50,7 +67,7 @@ def search_playlists(query, limit=30):
         return []
 
 def get_search_query():
-    query = input("Enter search query: ")
+    query = input("Enter search query (or 0 for your playlists): ")
     logging.info(f"User entered search query: {query}")
     return query
 
@@ -133,11 +150,11 @@ def chunk_tracks(tracks, chunk_size=100):
 
 def play_track_chunk(chunk, device_id):
     track_ids = [track['id'] for track in chunk if track.get('id')]
-    
+
     if not track_ids:
         print("No valid track IDs found.")
         return False
-    
+
     try:
         sp.start_playback(device_id=device_id, uris=['spotify:track:' + tid for tid in track_ids])
         print(f"Playing chunk with {len(track_ids)} tracks...")
@@ -296,7 +313,10 @@ def main():
     while True:
         try:
             query = get_search_query()
-            playlists = search_playlists(query)
+            if query == '0':
+                playlists = get_user_playlists()
+            else:
+                playlists = search_playlists(query)
             selected = select_playlist(playlists)
             if selected:
                 process_playlist(selected)
