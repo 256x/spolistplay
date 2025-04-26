@@ -21,7 +21,7 @@ if not CLIENT_ID or not CLIENT_SECRET or not REDIRECT_URI:
     print("Error: Spotify Client ID, Client Secret, or Redirect URI not set.")
     sys.exit(1)
 
-scope = "user-read-playback-state,user-modify-playback-state,user-read-currently-playing"
+scope = "user-read-playback-state,user-modify-playback-state,user-read-currently-playing,playlist-read-private"  # playlist-read-private を追加
 auth_manager = SpotifyOAuth(client_id=CLIENT_ID,
                             client_secret=CLIENT_SECRET,
                             redirect_uri=REDIRECT_URI,
@@ -54,11 +54,18 @@ def clear_screen():
 
 def search_playlists(query, limit=30):
     try:
-        result = sp.search(q=query, type='playlist', limit=limit)
-        playlists = result['playlists']['items'] if 'playlists' in result else []
-        playlists = [playlist for playlist in playlists if playlist is not None]
-        logging.info(f"Searched for playlists with query '{query}'. Results: {len(playlists)}")
-        return playlists
+        if query == '0':
+            # 自分のプレイリストを取得
+            playlists = sp.current_user_playlists(limit=limit)['items']
+            logging.info(f"Retrieved user's playlists. Results: {len(playlists)}")
+            return playlists
+        else:
+            # 通常の検索
+            result = sp.search(q=query, type='playlist', limit=limit)
+            playlists = result['playlists']['items'] if 'playlists' in result else []
+            playlists = [playlist for playlist in playlists if playlist is not None]
+            logging.info(f"Searched for playlists with query '{query}'. Results: {len(playlists)}")
+            return playlists
     except Exception as e:
         logging.error(f"Error while searching for playlists: {e}", exc_info=True)
         print(f"Error searching playlists: {e}")
@@ -119,7 +126,6 @@ def process_playlist(playlist):
             return
 
         print(f"Found {len(tracks)} tracks in the playlist.")
-
         start_playback_loop(tracks, playlist_info=playlist)
 
     except Exception as e:
