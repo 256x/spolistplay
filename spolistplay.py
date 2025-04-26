@@ -50,9 +50,9 @@ POLLING_INTERVAL = 2
 def clear_screen():
     sys.stdout.write('\033c')
     sys.stdout.flush()
-    print(f"- spotify playlist player\n")
+    print(f"\n- spotify playlist player\n")
 
-def search_playlists(query, limit=20):
+def search_playlists(query, limit=30):
     try:
         result = sp.search(q=query, type='playlist', limit=limit)
         playlists = result['playlists']['items'] if 'playlists' in result else []
@@ -227,7 +227,7 @@ def start_playback_loop(tracks, playlist_info=None):
     clear_screen()
 
     if playlist_info:
-        print(f"[ playlist : {playlist_info['name']} by {playlist_info['owner']['display_name']} ]\n")
+        print(f"- [ {playlist_info['name']} | {playlist_info['owner']['display_name']} ]\n")
 
     try:
         shuffle_state = True
