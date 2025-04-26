@@ -1,4 +1,3 @@
-```markdown
 # Spotify Playlist BGM Player (JP/EN)
 
 ---
