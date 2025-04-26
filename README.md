@@ -1,3 +1,4 @@
+```
 # Spotify Playlist BGM Player (JP/EN)
 
 ---
@@ -28,7 +29,7 @@
 
 #### 1. スクリプトの入手
 
-このコードを `spotify_bgm_player.py` のような名前でファイルに保存します。
+このコードを `spolistplay.py` という名前でファイルに保存します。
 
 #### 2. 必要なライブラリのインストール
 
@@ -73,7 +74,7 @@ export SPOTIPY_REDIRECT_URI='https://127.0.0.1/'
 2.  スクリプトを実行します。
 
     ```bash
-    python spotify_bgm_player.py
+    python spolistplay.py
     ```
 
 3.  初回実行時には、ブラウザが開きSpotifyアカウントへのアクセス許可を求められます。承認してください。承認後、ブラウザのアドレスバーに表示されるURLにリダイレクトされます。このURLをターミナルに貼り付けてEnterを押すように求められる場合があります（Redirect URIの設定やブラウザの挙動によります）。
@@ -158,7 +159,7 @@ This script is a simple tool that uses the Spotify Web API to search for playlis
 
 #### 1. Get the Script
 
-Save the provided code into a file named `spotify_bgm_player.py` or similar.
+Save the provided code into a file named `spolistplay.py`.
 
 #### 2. Install Dependencies
 
@@ -203,7 +204,7 @@ export SPOTIPY_REDIRECT_URI='https://127.0.0.1/'
 2.  Run the script:
 
     ```bash
-    python spotify_bgm_player.py
+    python spolistplay.py
     ```
 
 3.  The first time you run it, a browser window will open asking for permission to access your Spotify account. Authorize it. After authorization, you may be redirected to a URL in your browser's address bar. You might be prompted to paste this URL back into the terminal and press Enter (this depends on your Redirect URI settings and browser behavior).
@@ -260,4 +261,3 @@ export SPOTIPY_REDIRECT_URI='https://127.0.0.1/'
 *   Spotify authentication credentials are cached in a hidden directory within your user's home directory (`~/.cache/spotify/.spotify_cache`). This allows subsequent runs to skip authentication. If you need to re-authenticate, delete this file.
 *   If no playable devices are detected, the device selection step will fail, and playback cannot start. Ensure you have an active Spotify device (e.g., by starting playback in the Spotify app) before using this script.
 ```
-
