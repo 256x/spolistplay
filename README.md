@@ -24,10 +24,9 @@
 
 1.  **Clone the repository:**
     ```bash
-    git clone <repository_url>
+    git clone https://github.com/256x/spolistplay
     cd spolistplay
     ```
-    *(Replace `<repository_url>` with the actual URL of your Git repository).*
 
 2.  **Install dependencies:**
     Use pip to install the required libraries.

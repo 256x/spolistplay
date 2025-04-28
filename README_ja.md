@@ -22,11 +22,9 @@
 
 1.  **リポジトリをクローンします:**
     ```bash
-    git clone <repository_url>
+    git clone https://github.com/256x/spolistplay
     cd spolistplay
     ```
-    *(`<repository_url>` はあなたの Git リポジトリの実際の URL に置き換えてください)。*
-
 2.  **依存関係をインストールします:**
     pip を使って必要なライブラリをインストールします。
     ```bash
