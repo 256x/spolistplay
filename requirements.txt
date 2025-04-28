@@ -1,0 +1,2 @@
+spotipy
+windows-curses; platform_system == "Windows"
