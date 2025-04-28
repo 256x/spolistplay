@@ -1,5 +1,7 @@
 # spolistplay: Command-Line Spotify Playlist Player
 
+[日本語版はこちら](https://github.com/256x/spolistplay/blob/main/README_ja.md)
+
 `spolistplay` is a simple command-line tool written in Python that allows you to search for Spotify playlists, select one, choose a playback device, and control playback directly from your terminal using an interactive interface.
 
 **Note:** This tool requires a **Spotify Premium account** for playback control features via the API.
