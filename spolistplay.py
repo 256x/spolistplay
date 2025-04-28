@@ -658,12 +658,12 @@ def playback_curses(stdscr, sp, playlist_info, tracks, device_id):
             command_win.clear()
 
             commands = [
-                ("P", "Play/Pause"),
-                ("<", "Prev"),
-                (">", "Next"),
-                ("ESC", "Back"),
-                ("S", "Shaffle"),
-                ("X", "Exit"),
+                ("P", "play/pause"),
+                ("<", "prev"),
+                (">", "next"),
+                ("ESC", "back"),
+                ("S", "shaffle"),
+                ("X", "exit"),
             ]
 
             cmd_str_parts = [f"{key}:{action}" for key, action in commands]
