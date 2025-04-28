@@ -133,10 +133,6 @@
 *   **Terminal Compatibility:** The interactive interface uses terminal capabilities. Ensure your terminal supports basic full-screen and key input handling. If you are on Windows, installing `windows-curses` might help.
 *   **`getch` Issues:** The character input (`getch`) is implemented with basic methods. It might not work perfectly on all terminal types or configurations.
 
-## Contributing
-
-Feel free to submit issues or pull requests on GitHub if you find bugs or have suggestions for improvements.
-
 ## License
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.
