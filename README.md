@@ -2,7 +2,7 @@
 
 [Japanese Version (日本語版はこちら)](README_jp.md)
 
-![spolistplay demo gif](https://github.com/user-attachments/assets/ea13c0fb-af09-48e8-9b6b-1109919e3ccf)
+![spolistplay demo gif](https://github.com/user-attachments/assets/26c22414-2cb2-4e26-a5db-219ecaf04398)
 
 A terminal-based Spotify playlist player using the `curses` library. Search for playlists, select one, choose an active Spotify device, and control playback directly from your terminal.
 
