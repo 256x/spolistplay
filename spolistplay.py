@@ -1,3 +1,5 @@
+# --- START OF FILE spolistplay.py ---
+
 import os
 import sys
 import json
@@ -6,12 +8,13 @@ from spotipy.oauth2 import SpotifyOAuth
 import curses
 import time
 import logging
+import platform
 
-logging.basicConfig(level=logging.WARN, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.WARN, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stderr)
 
 CLIENT_ID = os.environ.get("SPOTIPY_CLIENT_ID")
 CLIENT_SECRET = os.environ.get("SPOTIPY_CLIENT_SECRET")
-REDIRECT_URI = os.environ.get("SPOTIPY_REDIRECT_URI", "https://127.0.0.1/")
+REDIRECT_URI = os.environ.get("SPOTIPY_REDIRECT_URI", "https://127.0.0.0/")
 
 if not (CLIENT_ID and CLIENT_SECRET and REDIRECT_URI):
     print("Error: Spotify Client ID, Client Secret, or Redirect URI is not set.")
@@ -36,7 +39,7 @@ try:
     )
     sp = spotipy.Spotify(auth_manager=auth_manager, requests_timeout=20)
     user_profile = sp.me()
-    logging.info("User profile loaded: " + json.dumps(user_profile))
+    logging.info("Spotify authentication successful for user: " + user_profile.get('display_name', 'N/A'))
     print("Spotify authentication successful.")
 
 except Exception as e:
@@ -45,94 +48,183 @@ except Exception as e:
     print(f"Details: {e}")
     sys.exit(1)
 
-def clear_screen():
+def truncate_text(text, max_length):
+    """Truncates text and adds '...' if it exceeds max_length."""
+    if not isinstance(text, str):
+        text = str(text)
+    if max_length is None or max_length < 0:
+         return text
+    if max_length < 4:
+         return text[:max_length]
+    if len(text) <= max_length:
+        return text
+    return text[:max_length - 3] + "..."
+
+def clear_screen(stdscr=None):
+    """Clears the terminal screen. Uses curses if stdscr is provided, otherwise OS command."""
+    if stdscr:
+        try:
+            stdscr.clear()
+            stdscr.refresh()
+        except curses.error as e:
+            logging.warning(f"Curses clear failed, attempting OS clear: {e}", exc_info=True)
+            os_clear()
+    else:
+        os_clear()
+        print(" - Spotify Playlist Player\n")
+
+
+def os_clear():
+    """Clears the terminal using OS-specific commands and ANSI codes."""
     os.system("cls" if os.name == "nt" else "clear")
     print("\033[2J\033[H", end="", flush=True)
-    print("- Spotify Playlist Player\n")
+
 
 def getch():
+    """Reads a single character input from the terminal (assuming raw mode is set externally)."""
     try:
-        import termios, tty
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setraw(fd)
-            ch = sys.stdin.read(1)
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        return ch
+        if platform.system() == "Windows":
+            import msvcrt
+            return msvcrt.getch().decode("utf-8", errors='ignore')
+        else:
+            return sys.stdin.read(1)
     except ImportError:
-        import msvcrt
-        try:
-            return msvcrt.getch().decode("utf-8")
-        except UnicodeDecodeError:
-            return ''
+        logging.error("Required modules for getch (msvcrt/termios) not found.", exc_info=True)
+        return ''
+    except EOFError:
+         logging.error("EOFError encountered in getch. Input stream might be closed.", exc_info=True)
+         return ''
     except Exception as e:
-         logging.error(f"Error in getch(): {e}")
+         logging.error(f"Error reading character in getch: {e}", exc_info=True)
          return ''
 
+
 def get_search_query():
-    clear_screen()
-    prompt = "search: "
-    print(prompt, end="", flush=True)
+    """Gets a search query character by character from the user, managing raw mode."""
+    fd = sys.stdin.fileno()
+    original_termios_settings = None
+    prompt = " search: "
     query = ""
-    while True:
+
+    clear_screen()
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+
+    if platform.system() != "Windows":
         try:
-            ch = getch()
-            if not ch: continue
-
-            if ord(ch) == 27:
-                print("\nESC pressed. Exiting.")
-                sys.exit(0)
-            elif ch in ("\r", "\n"):
-                break
-            elif ord(ch) in (8, 127):
-                 if query:
-                      query = query[:-1]
-                      print("\b \b", end="", flush=True)
-            elif ord(ch) == 3:
-                 raise KeyboardInterrupt
-            elif len(ch) == 1 and (32 <= ord(ch) < 127 or ord(ch) >= 128):
-                 query += ch
-                 print(ch, end="", flush=True)
-
-        except KeyboardInterrupt:
-             print("\nCtrl+C pressed. Exiting.")
-             raise
-
+            import termios, tty
+            original_termios_settings = termios.tcgetattr(fd)
+            logging.debug("Setting terminal to raw mode for get_search_query")
+            tty.setraw(fd)
         except Exception as e:
-             logging.error(f"Error during search query input: {e}", exc_info=True)
-             print(f"\nAn error occurred during input: {e}.")
-             return query
+            logging.error(f"Failed to set terminal to raw mode: {e}. Input will be buffered.", exc_info=True)
+            logging.error("\nFalling back to standard input (no character editing). Please press Enter after typing.")
+            sys.stdout.write(prompt)
+            sys.stdout.flush()
+            try:
+                 query = input()
+                 return query.strip()
+            except KeyboardInterrupt:
+                 print("\nCtrl+C pressed. Exiting.")
+                 raise
+            except Exception as e:
+                 logging.error(f"Error during standard input fallback: {e}", exc_info=True)
+                 print(f"\nAn error occurred: {e}.")
+                 return ""
 
-    print()
-    return query
+    try:
+        while True:
+            ch = getch()
+            logging.debug(f"Read char in raw mode: {ord(ch) if ch else 'N/A'} ({ch!r})")
 
-def search_playlists(query, limit=30):
+            if not ch:
+                 logging.debug("getch returned empty string, breaking input loop.")
+                 break
+
+            if ord(ch) == 3:
+                logging.debug("Ctrl+C detected in raw mode input")
+                raise KeyboardInterrupt
+
+            if ch in ('\r', '\n'):
+                sys.stdout.write('\n')
+                sys.stdout.flush()
+                break
+
+            if ord(ch) in (8, 127):
+                if query:
+                    query = query[:-1]
+                    sys.stdout.write('\b \b')
+                    sys.stdout.flush()
+                else:
+                     pass
+            elif ord(ch) == 27:
+                 logging.debug("ESC key detected")
+                 print("\nESC pressed. Returning.")
+                 return None
+
+            elif ' ' <= ch <= '~' or ord(ch) >= 128:
+                 query += ch
+                 sys.stdout.write(ch)
+                 sys.stdout.flush()
+            else:
+                 logging.debug(f"Ignoring control character: {ord(ch)}")
+
+
+    except KeyboardInterrupt:
+         print("\nCtrl+C pressed. Exiting.")
+         raise
+
+    except Exception as e:
+         logging.error(f"Error during search query raw input loop: {e}", exc_info=True)
+         print(f"\nAn unexpected error occurred during input: {e}.")
+         pass
+
+    finally:
+        if original_termios_settings and platform.system() != "Windows":
+            try:
+                import termios
+                logging.debug("Restoring terminal settings after get_search_query")
+                termios.tcsetattr(fd, termios.TCSADRAIN, original_termios_settings)
+                sys.stdout.write('\r\n')
+                sys.stdout.flush()
+
+            except Exception as restore_e:
+                logging.error(f"Failed to restore terminal settings: {restore_e}", exc_info=True)
+
+    return query.strip()
+
+
+def search_playlists(query, limit=50):
+    """Searches Spotify for playlists based on the query."""
     try:
         if query == "0":
             print("Fetching your playlists...")
             playlists = []
             offset = 0
+            playlist_fetch_limit = 50
             while True:
-                results = sp.current_user_playlists(limit=limit, offset=offset)
+                results = sp.current_user_playlists(limit=playlist_fetch_limit, offset=offset)
                 items = results.get("items", [])
                 if not items:
                     break
                 playlists.extend(items)
-                if len(items) < limit:
+                if len(items) < playlist_fetch_limit:
                     break
-                offset += limit
+                offset += playlist_fetch_limit
 
             logging.info(f"Retrieved user's playlists. Count: {len(playlists)}")
 
         else:
             print(f"Searching for playlists matching '{query}'...")
-            result = sp.search(q=query, type="playlist", limit=limit)
+            search_api_limit = 50
+            result = sp.search(q=query, type="playlist", limit=search_api_limit)
             playlists = result["playlists"]["items"] if "playlists" in result else []
             logging.info(f"Searched for playlists with query '{query}'. Count: {len(playlists)}")
 
-        valid_playlists = [pl for pl in playlists if pl and pl.get("tracks") is not None and pl.get("tracks", {}).get("total") is not None]
+        valid_playlists = [
+            pl for pl in playlists
+            if pl and pl.get("tracks") is not None and pl.get("tracks", {}).get("total") is not None
+        ]
         return valid_playlists
 
     except Exception as e:
@@ -140,174 +232,619 @@ def search_playlists(query, limit=30):
         print(f"Error searching playlists: {e}")
         return []
 
-def select_playlist(playlists):
-    clear_screen()
+def init_iceberg_colors():
+    """Initializes curses color pairs for an iceberg-like theme."""
+    if not curses.has_colors():
+        logging.warning("Terminal does not support colors.", exc_info=True)
+        return
+
+    default_bg = -1
+    try:
+        curses.init_pair(1, curses.COLOR_WHITE, default_bg)
+        logging.debug(f"Initialized color pair 1 with default background ({default_bg}).")
+    except curses.error as e:
+        logging.warning(f"Failed to initialize color pair 1 with default background ({default_bg}): {e}. Trying COLOR_BLACK (0) instead.", exc_info=True)
+        default_bg = curses.COLOR_BLACK
+        try:
+             curses.init_pair(1, curses.COLOR_WHITE, default_bg)
+             logging.debug(f"Initialized color pair 1 with COLOR_BLACK background ({default_bg}).")
+        except curses.error as e_black:
+             logging.error(f"Failed to initialize color pair 1 with COLOR_BLACK background ({default_bg}): {e_black}. Colors might not display correctly.", exc_info=True)
+             pass
+
+    if curses.COLORS >= 16:
+        try:
+            curses.init_pair(2, 110, default_bg)
+            curses.init_pair(3, 109, default_bg)
+            curses.init_pair(4, 146, default_bg)
+            curses.init_pair(5, 216, default_bg)
+            curses.init_pair(6, 167, default_bg)
+            curses.init_pair(7, 150, default_bg)
+            logging.debug("Initialized 256-color pairs.")
+
+        except curses.error as e:
+             logging.warning(f"Failed to initialize 256 colors or with selected background: {e}. Falling back to standard colors.", exc_info=True)
+             init_standard_colors()
+
+    else:
+        logging.debug("Terminal supports less than 16 colors. Using standard 8 colors.")
+        init_standard_colors()
+
+def init_standard_colors():
+    """Initializes curses color pairs for 8-color terminals."""
+    if not curses.has_colors():
+         return
+
+    default_bg = -1
+    try:
+        curses.init_pair(1, curses.COLOR_WHITE, default_bg)
+        curses.init_pair(2, curses.COLOR_CYAN, default_bg)
+        curses.init_pair(3, curses.COLOR_BLUE, default_bg)
+        curses.init_pair(4, curses.COLOR_MAGENTA, default_bg)
+        curses.init_pair(5, curses.COLOR_YELLOW, default_bg)
+        curses.init_pair(6, curses.COLOR_RED, default_bg)
+        curses.init_pair(7, curses.COLOR_GREEN, default_bg)
+        logging.debug("Initialized standard 8-color pairs with default background.")
+
+    except curses.error as e:
+         logging.warning(f"Failed to initialize standard color pairs with default background ({default_bg}): {e}. Trying COLOR_BLACK (0) instead.", exc_info=True)
+         default_bg = curses.COLOR_BLACK
+         try:
+              curses.init_pair(1, curses.COLOR_WHITE, default_bg)
+              curses.init_pair(2, curses.COLOR_CYAN, default_bg)
+              curses.init_pair(3, curses.COLOR_BLUE, default_bg)
+              curses.init_pair(4, curses.COLOR_MAGENTA, default_bg)
+              curses.init_pair(5, curses.COLOR_YELLOW, default_bg)
+              curses.init_pair(6, curses.COLOR_RED, default_bg)
+              curses.init_pair(7, curses.COLOR_GREEN, default_bg)
+              logging.debug(f"Initialized standard 8-color pairs with COLOR_BLACK background ({default_bg}).")
+         except curses.error as e_black:
+              logging.error(f"Failed to initialize standard color pairs with COLOR_BLACK background ({default_bg}): {e_black}. Colors might not display correctly.", exc_info=True)
+              pass
+
+
+def display_commands_popup(stdscr, commands, title="Commands"):
+    """Displays commands in a temporary popup window."""
+    max_key_width = max(len(k) for k, _ in commands) if commands else 0
+    max_action_width = max(len(a) for _, a in commands) if commands else 0
+
+    command_line_width = max_key_width + len(": ") + max_action_width
+
+    popup_width = max(command_line_width, len(title)) + 4
+    popup_height = len(commands) + 3
+
+    max_y, max_x = stdscr.getmaxyx()
+
+    if popup_height > max_y or popup_width > max_x:
+         logging.warning(f"Terminal too small to display command popup ({popup_width}x{popup_height}). Terminal size: {max_x}x{max_y}")
+         return
+
+    popup_y = (max_y - popup_height) // 2
+    popup_x = (max_x - popup_width) // 2
+
+    popup_win = curses.newwin(popup_height, popup_width, popup_y, popup_x)
+    popup_win.box()
+    popup_win.bkgd(' ', curses.color_pair(1))
+
+    title_start_col = (popup_width - len(title)) // 2
+    popup_win.addstr(1, title_start_col, title, curses.color_pair(5) | curses.A_BOLD)
+
+    key_end_col_in_popup = 2 + max_key_width
+    action_start_col_in_popup = key_end_col_in_popup + len(": ")
+
+    for i, (key_str, action_str) in enumerate(commands):
+        row = 2 + i
+        key_start_col_in_popup = key_end_col_in_popup - len(key_str)
+        popup_win.addstr(row, key_start_col_in_popup, key_str, curses.color_pair(3))
+
+        popup_win.addstr(row, key_end_col_in_popup, ": ", curses.color_pair(3))
+        popup_win.addstr(row, action_start_col_in_popup, action_str, curses.color_pair(3))
+
+
+    stdscr.noutrefresh()
+    popup_win.noutrefresh()
+    curses.doupdate()
+
+    getch()
+
+    stdscr.clear()
+    stdscr.bkgd(' ', curses.color_pair(1))
+    stdscr.noutrefresh()
+    curses.doupdate()
+    del popup_win
+
+
+def select_playlist_curses(stdscr, playlists):
+    """Displays a paginated list of playlists using curses and allows user to select one."""
+    init_iceberg_colors()
+
     if not playlists:
-        print("No playlists found.")
+        stdscr.addstr(0, 0, "No valid playlists found.", curses.color_pair(6))
+        stdscr.addstr(1, 0, "Press any key to return.", curses.color_pair(3))
+        stdscr.refresh()
+        stdscr.getch()
         return None
 
-    valid_playlists = [pl for pl in playlists if pl.get("tracks") and pl.get("tracks", {}).get("total") is not None]
+    curses.curs_set(0)
+    stdscr.nodelay(True)
+    stdscr.timeout(100)
+
+    valid_playlists = [pl for pl in playlists if pl.get("tracks", {}).get("total") is not None]
 
     if not valid_playlists:
-        print("No valid playlists with track counts found.")
-        return None
+         stdscr.addstr(0, 0, "No valid playlists with track counts found.", curses.color_pair(6))
+         stdscr.addstr(1, 0, "Press any key to return.", curses.color_pair(3))
+         stdscr.refresh()
+         stdscr.getch()
+         return None
 
     sorted_playlists = sorted(valid_playlists, key=lambda p: p.get("tracks", {}).get("total", 0), reverse=True)
 
-    print("Playlists:")
-    display_limit = 30
-    for idx, pl in enumerate(sorted_playlists[:display_limit]):
-        track_count = pl.get("tracks", {}).get("total", "N/A")
-        print(f"{idx+1}. {pl['name']} ({track_count} tracks) - {pl['owner']['display_name']}")
+    items_per_page = 10
+    total_items = len(sorted_playlists)
+    total_pages = (total_items + items_per_page - 1) // items_per_page
+    current_page = 1
+    selected_idx_in_page = 0
+    number_input = ""
 
-    if len(sorted_playlists) > display_limit:
-         print(f"... {len(sorted_playlists) - display_limit} more playlists not shown.")
+    min_required_y = 1 + 1 + items_per_page + 3
+    min_required_x = 40
+
+    max_y, max_x = stdscr.getmaxyx()
+    if max_y < min_required_y or max_x < min_required_x:
+        raise ValueError(f"Terminal too small for playlist selection. Needs at least {min_required_y}x{min_required_x}. Current size: {max_y}x{max_x}")
 
 
-    selected_input = input("\nEnter playlist number to select: ")
-    try:
-        selected = int(selected_input) - 1
-        if 0 <= selected < len(sorted_playlists):
-            return sorted_playlists[selected]
-        else:
-            print("Invalid selection number.")
-            return None
-    except ValueError:
-        print("Invalid input. Please enter a number.")
-        return None
+    running = True
+    while running:
+        max_y, max_x = stdscr.getmaxyx()
+        if max_y < min_required_y or max_x < min_required_x:
+             raise ValueError(f"Terminal resized too small for playlist selection. Needs at least {min_required_y}x{min_required_x}. Current size: {max_y}x{max_x}")
+
+        stdscr.clear()
+        stdscr.bkgd(' ', curses.color_pair(1))
+
+        usable_x = max_x - 2
+
+        stdscr.addstr(1, 1, "- Playlists", curses.color_pair(5) | curses.A_BOLD)
+
+        start_idx_overall = (current_page - 1) * items_per_page
+        end_idx_overall = min(start_idx_overall + items_per_page, total_items)
+
+        if selected_idx_in_page >= (end_idx_overall - start_idx_overall) and (end_idx_overall - start_idx_overall) > 0:
+            selected_idx_in_page = (end_idx_overall - start_idx_overall) - 1
+        elif (end_idx_overall - start_idx_overall) == 0:
+             selected_idx_in_page = 0
+
+
+        for i in range(start_idx_overall, end_idx_overall):
+            pl = sorted_playlists[i]
+            track_count = pl.get("tracks", {}).get("total", "N/A")
+            display_idx = i + 1
+            name = truncate_text(pl['name'], usable_x - 25)
+            owner = truncate_text(pl['owner']['display_name'], 15)
+
+            display_line = f"{display_idx}. {name} ({track_count} tracks) - {owner}"
+            display_line = truncate_text(display_line, usable_x)
+
+            row = 3 + (i - start_idx_overall)
+
+            if row < max_y - 3:
+                 if (i - start_idx_overall) == selected_idx_in_page:
+                     stdscr.addstr(row, 1, display_line, curses.color_pair(2) | curses.A_REVERSE)
+                 else:
+                     stdscr.addstr(row, 1, display_line, curses.color_pair(1))
+
+        status_line = f"Page {current_page}/{total_pages} - Total: {total_items} playlists"
+        stdscr.addstr(max_y - 1, 1, truncate_text(status_line, usable_x), curses.color_pair(3))
+
+        input_prompt = "Select #: "
+        input_row = max_y - 3
+        if input_row >= 0:
+            stdscr.addstr(input_row, 1, input_prompt, curses.color_pair(3))
+            stdscr.addstr(input_row, 1 + len(input_prompt), number_input)
+            stdscr.clrtoeol()
+
+        commands_hint_line = "Press '?' for commands."
+        stdscr.addstr(max_y - 2, 1, truncate_text(commands_hint_line, usable_x), curses.color_pair(3))
+
+
+        stdscr.noutrefresh()
+        curses.doupdate()
+
+        key = stdscr.getch()
+
+        if key != -1:
+            if ord('0') <= key <= ord('9'):
+                number_input += chr(key)
+            elif key in (ord('\n'), ord('\r'), curses.KEY_ENTER):
+                if number_input:
+                    try:
+                        selected_num = int(number_input)
+                        if 1 <= selected_num <= total_items:
+                            running = False
+                            return sorted_playlists[selected_num - 1]
+                        else:
+                            error_row = max_y - 3
+                            if error_row >= 0:
+                                stdscr.addstr(error_row, 1 + len(input_prompt) + len(number_input), " Invalid!", curses.color_pair(6))
+                                stdscr.noutrefresh()
+                                curses.doupdate()
+                                time.sleep(0.5)
+                            number_input = ""
+                    except ValueError:
+                         number_input = ""
+
+                else:
+                     selected_overall_idx = start_idx_overall + selected_idx_in_page
+                     if 0 <= selected_overall_idx < total_items:
+                         running = False
+                         return sorted_playlists[selected_overall_idx]
+
+
+            elif key in (8, 127, curses.KEY_BACKSPACE):
+                 if number_input:
+                      number_input = number_input[:-1]
+                 else:
+                      pass
+
+            elif number_input:
+                 pass
+
+            elif key == ord('?'):
+                 commands_list = [
+                     ("Arrows/jk/lh", "Navigate/Page"),
+                     ("#", "Direct Select"),
+                     ("Enter", "Select Item"),
+                     ("ESC", "Back to Search"),
+                 ]
+                 display_commands_popup(stdscr, commands_list, "Playlist Commands")
+
+
+            elif key in (curses.KEY_UP, ord('k'), ord('K')):
+                 if selected_idx_in_page > 0:
+                      selected_idx_in_page -= 1
+                 elif current_page > 1:
+                      current_page -= 1
+                      prev_page_items_count = min(items_per_page, total_items - ((current_page - 1) * items_per_page))
+                      selected_idx_in_page = max(0, prev_page_items_count - 1)
+                 number_input = ""
+                 stdscr.clear()
+                 stdscr.bkgd(' ', curses.color_pair(1))
+                 stdscr.touchwin()
+
+
+            elif key in (curses.KEY_DOWN, ord('j'), ord('J')):
+                 start_idx_overall_current_page = (current_page - 1) * items_per_page
+                 current_page_items_count = min(items_per_page, total_items - start_idx_overall_current_page)
+                 if selected_idx_in_page < current_page_items_count - 1:
+                      selected_idx_in_page += 1
+                 elif current_page < total_pages:
+                      current_page += 1
+                      selected_idx_in_page = 0
+                 number_input = ""
+                 stdscr.clear()
+                 stdscr.bkgd(' ', curses.color_pair(1))
+                 stdscr.touchwin()
+
+            elif key in (curses.KEY_LEFT, ord('h'), ord('H')):
+                if current_page > 1:
+                    current_page -= 1
+                    selected_idx_in_page = 0
+                number_input = ""
+                stdscr.clear()
+                stdscr.bkgd(' ', curses.color_pair(1))
+                stdscr.touchwin()
+
+
+            elif key in (curses.KEY_RIGHT, ord('l'), ord('L')):
+                if current_page < total_pages:
+                    current_page += 1
+                    selected_idx_in_page = 0
+                number_input = ""
+                stdscr.clear()
+                stdscr.bkgd(' ', curses.color_pair(1))
+                stdscr.touchwin()
+
+
+            elif key == 27:
+                running = False
+                return None
+
+
+    return None
+
 
 def get_all_playlist_tracks(playlist_id):
+    """Fetches all tracks from a given playlist ID using pagination."""
     tracks = []
     offset = 0
     limit = 100
     retry_limit = 3
     print("Fetching playlist tracks...")
-    while True:
-        attempt = 0
-        results = None
-        while attempt < retry_limit:
-            try:
-                results = sp.playlist_items(
-                    playlist_id,
-                    offset=offset,
-                    limit=limit,
-                    fields="items(track(id,name,artists,album(id,name,release_date)))",
-                )
+    try:
+        while True:
+            attempt = 0
+            results = None
+            while attempt < retry_limit:
+                try:
+                    results = sp.playlist_items(
+                        playlist_id,
+                        offset=offset,
+                        limit=limit,
+                        fields="items(track(id,name,artists(name),album(id,name,release_date)))",
+                        market='from_token'
+                    )
+                    break
+                except spotipy.exceptions.SpotifyException as se:
+                    attempt += 1
+                    logging.warning(f"Attempt {attempt} of {retry_limit}: Spotify API error retrieving tracks: {se}", exc_info=True)
+                    if attempt < retry_limit:
+                        print(f"Retrying track fetch ({attempt}/{retry_limit})...")
+                        time.sleep(2)
+                    else:
+                        logging.error("Max retry attempts reached for retrieving tracks.")
+                        print(f"Failed to fetch tracks after multiple retries: {se}")
+                        return tracks
+                except Exception as e:
+                    attempt += 1
+                    logging.warning(f"Attempt {attempt} of {retry_limit}: Unexpected error retrieving tracks: {e}", exc_info=True)
+                    if attempt < retry_limit:
+                        print(f"Retrying track fetch ({attempt}/{retry_limit})...")
+                        time.sleep(2)
+                    else:
+                        logging.error("Max retry attempts reached for retrieving tracks.")
+                        print(f"Failed to fetch tracks after multiple retries: {e}")
+                        return tracks
+
+
+            if results is None or not results.get("items"):
                 break
-            except Exception as e:
-                attempt += 1
-                logging.warning(f"Attempt {attempt} of {retry_limit}: Error retrieving tracks: {e}")
-                if attempt < retry_limit:
-                    time.sleep(2)
+
+            valid_items_count = 0
+            for item in results.get("items", []):
+                track = item.get("track")
+                if track and track.get("id") and track.get("name") and track.get("artists"):
+                    tracks.append(track)
+                    valid_items_count += 1
                 else:
-                    logging.error("Max retry attempts reached for retrieving tracks. Stopping fetch.")
-                    print(f"Failed to fetch tracks after multiple retries. Error: {e}")
-                    return tracks
+                    logging.debug(f"Skipping invalid track item: {item}")
 
-        if results is None:
-             break
+            if len(results.get("items", [])) < limit and valid_items_count > 0:
+                 break
+            if len(results.get("items", [])) == 0:
+                 break
 
-        items = results.get("items", [])
-        if not items:
-            break
+            offset += limit
+            sys.stdout.flush()
 
-        for item in items:
-            track = item.get("track")
-            if track and track.get("id"):
-                tracks.append(track)
-            else:
-                logging.debug(f"Skipping invalid track item: {item}")
+    except Exception as e:
+        logging.error(f"Critical error during track fetching loop: {e}", exc_info=True)
+        print(f"A critical error occurred during track fetching: {e}")
+        return tracks
 
-        if len(items) < limit:
-            break
-
-        offset += limit
-        sys.stdout.flush()
-
-    print(f"Retrieved {len(tracks)} valid tracks.")
-    logging.info(f"Retrieved {len(tracks)} valid tracks from playlist {playlist_id}.")
+    print(f"\nFinished fetching tracks. Retrieved {len(tracks)} valid tracks.")
+    logging.info(f"Finished fetching tracks. Retrieved {len(tracks)} valid tracks from playlist {playlist_id}.")
     return tracks
 
-def select_device():
-    clear_screen()
+
+def select_device_curses(stdscr):
+    """Displays available devices using curses and allows user to select one."""
+    init_iceberg_colors()
+
+    curses.curs_set(0)
+    stdscr.nodelay(True)
+    stdscr.timeout(100)
+
+    min_required_y = 6
+    min_required_x = 40
+
+    running = True
+    selected_idx = 0
+    devices = []
+    number_input = ""
+    display_offset_device = 0
+
     try:
         devices = sp.devices()["devices"]
         if not devices:
-            print("No spotify devices found.")
-            print("Please make sure the Spotify application is running and logged in.")
-            return None
-
-        print("Available Devices:")
-        for idx, device in enumerate(devices):
-            active_str = "[Active]" if device["is_active"] else ""
-            print(f"{idx+1}. {device['name']} ({device['type']}) {active_str}")
-
-        selected_input = input("\nEnter device number to play on: ")
-        try:
-            selected = int(selected_input) - 1
-        except ValueError:
-            print("Invalid input. Please enter a number.")
-            return None
-
-        if 0 <= selected < len(devices):
-            return devices[selected]["id"]
-        else:
-            print("Invalid selection.")
+            max_y, max_x = stdscr.getmaxyx()
+            stdscr.clear()
+            stdscr.bkgd(' ', curses.color_pair(1))
+            stdscr.addstr(1, 1, "- Device", curses.color_pair(5) | curses.A_BOLD)
+            stdscr.addstr(3, 1, "No spotify devices found.", curses.color_pair(6))
+            stdscr.addstr(4, 1, "Make sure the Spotify application is running and logged in.", curses.color_pair(3))
+            stdscr.addstr(max_y - 1, 1, "Press any key to return.", curses.color_pair(3))
+            stdscr.noutrefresh()
+            curses.doupdate()
+            stdscr.getch()
             return None
     except Exception as e:
-        logging.error(f"Error selecting device: {e}", exc_info=True)
-        print(f"Error getting devices: {e}")
-        print("Please check your Spotify Premium account status and network.")
+        logging.error(f"Error fetching devices for curses selection: {e}", exc_info=True)
+        max_y, max_x = stdscr.getmaxyx()
+        stdscr.clear()
+        stdscr.bkgd(' ', curses.color_pair(1))
+        stdscr.addstr(1, 1, "- Device", curses.color_pair(5) | curses.A_BOLD)
+        stdscr.addstr(3, 1, "Error fetching devices.", curses.color_pair(6))
+        stdscr.addstr(4, 1, truncate_text(str(e), max_x - 2), curses.color_pair(6))
+        stdscr.addstr(max_y - 1, 1, "Press any key to return.", curses.color_pair(3))
+        stdscr.noutrefresh()
+        curses.doupdate()
+        stdscr.getch()
         return None
 
-def chunk_tracks(tracks, chunk_size=100):
-    track_uris = [f"spotify:track:{track['id']}" for track in tracks if track and track.get("id")]
-    return [track_uris[i: i + chunk_size] for i in range(0, len(track_uris), chunk_size)]
+    total_items = len(devices)
+    if total_items == 0:
+        return None
 
-def play_track_chunk(chunk_uris, device_id):
-    if not chunk_uris:
-        return False
-    try:
-        sp.start_playback(device_id=device_id, uris=chunk_uris)
-        logging.info(f"Started playback for a chunk of {len(chunk_uris)} tracks using uris.")
-        return True
-    except spotipy.exceptions.SpotifyException as e:
-        logging.error(f"SpotifyException starting playback: {e}", exc_info=True)
-        return False
-    except Exception as e:
-        logging.error(f"Error starting playback: {e}", exc_info=True)
-        return False
+    if selected_idx >= total_items:
+         selected_idx = total_items - 1
 
-def truncate_text(text, max_length):
-    if not isinstance(text, str):
-        text = str(text)
-    if max_length is None or max_length < 0:
-         return text
-    if max_length < 3:
-         return text[:max_length]
-    if len(text) <= max_length:
-        return text
-    return text[:max_length - 3] + "..."
 
-def init_iceberg_colors():
-    if curses.COLORS >= 16:
-        curses.init_pair(1, 223, -1)
-        curses.init_pair(2, 110, -1)
-        curses.init_pair(3, 109, -1)
-        curses.init_pair(4, 146, -1)
-        curses.init_pair(5, 216, -1)
-        curses.init_pair(6, 167, -1)
-        curses.init_pair(7, 150, -1)
-    else:
-        curses.init_pair(1, curses.COLOR_WHITE, -1)
-        curses.init_pair(2, curses.COLOR_CYAN, -1)
-        curses.init_pair(3, curses.COLOR_BLUE, -1)
-        curses.init_pair(4, curses.COLOR_MAGENTA, -1)
-        curses.init_pair(5, curses.COLOR_YELLOW, -1)
-        curses.init_pair(6, curses.COLOR_RED, -1)
-        curses.init_pair(7, curses.COLOR_GREEN, -1)
+    while running:
+        max_y, max_x = stdscr.getmaxyx()
+        if max_y < min_required_y or max_x < min_required_x:
+             raise ValueError(f"Terminal resized too small for device selection. Needs at least {min_required_y}x{min_required_x}. Current size: {max_y}x{max_x}")
 
-def playback_curses(stdscr, sp, playlist_info, tracks, device_id):
+        stdscr.clear()
+        stdscr.bkgd(' ', curses.color_pair(1))
+
+        usable_x = max_x - 2
+
+        stdscr.addstr(1, 1, "- Device", curses.color_pair(5) | curses.A_BOLD)
+
+        display_start_row = 3
+        max_display_items = max_y - display_start_row - 3
+
+        if max_display_items > 0:
+            if selected_idx < display_offset_device:
+                 display_offset_device = selected_idx
+            elif selected_idx >= display_offset_device + max_display_items:
+                 display_offset_device = selected_idx - max_display_items + 1
+
+            display_offset_device = max(0, display_offset_device)
+            display_offset_device = min(display_offset_device, max(0, total_items - max_display_items))
+        else:
+             display_offset_device = 0
+
+        for i in range(display_offset_device, min(display_offset_device + max_display_items, total_items)):
+            device = devices[i]
+            active_str = "[Active]" if device["is_active"] else ""
+            display_idx = i + 1
+
+            display_line = f"{display_idx}. {device['name']} ({device['type']}) {active_str}"
+            display_line = truncate_text(display_line, usable_x)
+
+            row = display_start_row + (i - display_offset_device)
+
+            if row < max_y - 3:
+                 if i == selected_idx:
+                     stdscr.addstr(row, 1, display_line, curses.color_pair(2) | curses.A_REVERSE)
+                 else:
+                     stdscr.addstr(row, 1, display_line, curses.color_pair(1))
+
+
+        commands_hint_line = "Press '?' for commands."
+        stdscr.addstr(max_y - 1, 1, truncate_text(commands_hint_line, usable_x), curses.color_pair(3))
+
+        input_prompt = "Select #: "
+        input_row = max_y - 2
+        if input_row >= 0:
+            stdscr.addstr(input_row, 1, input_prompt, curses.color_pair(3))
+            stdscr.addstr(input_row, 1 + len(input_prompt), number_input)
+            stdscr.clrtoeol()
+
+
+        stdscr.noutrefresh()
+        curses.doupdate()
+
+        key = stdscr.getch()
+
+        if key != -1:
+            if ord('0') <= key <= ord('9'):
+                number_input += chr(key)
+            elif key in (ord('\n'), ord('\r'), curses.KEY_ENTER):
+                if number_input:
+                    try:
+                        selected_num = int(number_input)
+                        if 1 <= selected_num <= total_items:
+                            running = False
+                            return devices[selected_num - 1]
+                        else:
+                            error_row = max_y - 2
+                            if error_row >= 0:
+                                stdscr.addstr(error_row, 1 + len(input_prompt) + len(number_input), " Invalid!", curses.color_pair(6))
+                                stdscr.noutrefresh()
+                                curses.doupdate()
+                                time.sleep(0.5)
+                            number_input = ""
+                    except ValueError:
+                         number_input = ""
+
+                else:
+                     if 0 <= selected_idx < total_items:
+                         running = False
+                         return devices[selected_idx]
+
+
+            elif key in (8, 127, curses.KEY_BACKSPACE):
+                 if number_input:
+                      number_input = number_input[:-1]
+                 else:
+                      pass
+
+            elif number_input:
+                 pass
+
+            elif key == ord('?'):
+                 commands_list = [
+                     ("Arrows/jk", "Navigate List"),
+                     ("lh", "Scroll List"),
+                     ("#", "Direct Select"),
+                     ("Enter", "Select Item"),
+                     ("q/ESC", "Back to Search"),
+                 ]
+                 display_commands_popup(stdscr, commands_list, "Device Commands")
+
+
+            elif key in (curses.KEY_UP, ord('k'), ord('K')):
+                 if selected_idx > 0:
+                      selected_idx -= 1
+                 number_input = ""
+                 stdscr.clear()
+                 stdscr.bkgd(' ', curses.color_pair(1))
+                 stdscr.touchwin()
+
+            elif key in (curses.KEY_DOWN, ord('j'), ord('J')):
+                 if selected_idx < total_items - 1:
+                      selected_idx += 1
+                 number_input = ""
+                 stdscr.clear()
+                 stdscr.bkgd(' ', curses.color_pair(1))
+                 stdscr.touchwin()
+
+            elif key in (curses.KEY_LEFT, ord('h'), ord('H')):
+                 if display_offset_device > 0:
+                      scroll_amount = max_display_items if max_display_items > 0 else 1
+                      display_offset_device = max(0, display_offset_device - scroll_amount)
+                      selected_idx = display_offset_device
+                      number_input = ""
+                      stdscr.clear()
+                      stdscr.bkgd(' ', curses.color_pair(1))
+                      stdscr.touchwin()
+
+
+            elif key in (curses.KEY_RIGHT, ord('l'), ord('L')):
+                 if max_display_items > 0 and display_offset_device + max_display_items < total_items:
+                      scroll_amount = max_display_items if max_display_items > 0 else 1
+                      display_offset_device = min(total_items - max_display_items, display_offset_device + scroll_amount)
+                      selected_idx = display_offset_device
+                      number_input = ""
+                      stdscr.clear()
+                      stdscr.bkgd(' ', curses.color_pair(1))
+                      stdscr.touchwin()
+
+            elif key in (ord('q'), ord('Q'), 27):
+                running = False
+                return None
+
+
+    return None
+
+
+def playback_curses(stdscr, sp_client, playlist_info, tracks, selected_device):
+    """Runs the curses UI for controlling playback. Returns False on X key exit, True otherwise."""
+    device_id = selected_device['id']
+    device_name = selected_device.get('name', 'Unknown Device')
+    device_supports_volume = selected_device.get('supports_volume', False)
+
+    MIN_PLAYBACK_TERM_Y = 10
+    MIN_PLAYBACK_TERM_X = 40
+
+    max_y, max_x = stdscr.getmaxyx()
+    if max_y < MIN_PLAYBACK_TERM_Y or max_x < MIN_PLAYBACK_TERM_X:
+        raise ValueError(f"Terminal too small for playback UI. Needs at least {MIN_PLAYBACK_TERM_Y}x{MIN_PLAYBACK_TERM_X}. Current size: {max_y}x{max_x}")
+
     curses.curs_set(0)
     stdscr.nodelay(True)
     stdscr.timeout(100)
@@ -316,76 +853,79 @@ def playback_curses(stdscr, sp, playlist_info, tracks, device_id):
     curses.use_default_colors()
     init_iceberg_colors()
 
-    max_y, max_x = stdscr.getmaxyx()
-    min_y, min_x = 10, 40
-    if max_y < min_y or max_x < min_x:
-        curses.endwin()
-        print(f"Error: Terminal too small. Needs at least {min_y}x{min_x}. Current size: {max_y}x{max_x}")
-        return
-
     padding = 1
     header_h = 1
-    command_h = 1
-
     min_body_h_required = 6
 
     usable_y = max_y - (padding * 2)
     usable_x = max_x - (padding * 2)
-    body_h = usable_y - header_h - command_h - 1
+    body_h = usable_y - header_h - 1
 
-    if body_h < min_body_h_required:
-         curses.endwin()
-         print(f"Error: Terminal height too small for initial layout. Needs at least {min_body_h_required + header_h + command_h + padding*2 + 1} lines total. Current size: {max_y}x{max_x}")
-         sys.exit(1)
+    min_required_y = header_h + 1 + min_body_h_required + 1 + padding
+    if max_y < min_required_y or body_h < min_body_h_required:
+         raise ValueError(f"Terminal height too small for layout. Needs at least {min_required_y} lines total. Current size: {max_y}x{max_x}")
 
-    header_win = curses.newwin(header_h, usable_x, padding, padding)
-    body_win = curses.newwin(body_h, usable_x, padding + header_h + 1, padding)
-    command_win = curses.newwin(command_h, usable_x, max_y - padding - command_h, padding)
+    try:
+        header_win = curses.newwin(header_h, usable_x, padding, padding)
+        body_win = curses.newwin(body_h, usable_x, padding + header_h + 1, padding)
+    except curses.error as e:
+        logging.error(f"Failed to create curses windows: {e}", exc_info=True)
+        raise ValueError(f"Failed to initialize UI windows: {e}") from e
 
     stdscr.bkgd(' ', curses.color_pair(1))
+    stdscr.clear()
+    stdscr.refresh()
 
-    track_uri_chunks = chunk_tracks(tracks, chunk_size=100)
+    playlist_uri = playlist_info.get('uri')
+    first_track_uri = None
+    if tracks and tracks[0] and tracks[0].get("id"):
+         first_track_uri = f"spotify:track:{tracks[0]['id']}"
 
-    if not track_uri_chunks:
-        body_win.addstr(0, 0, "No valid tracks to play.", curses.color_pair(6))
+
+    if not playlist_uri or not first_track_uri:
+        body_win.addstr(0, 0, "Error: Cannot start playback - missing playlist or track URI.", curses.color_pair(6))
+        body_win.addstr(1, 0, "Ensure playlist has valid tracks.", curses.color_pair(6))
         body_win.noutrefresh()
         stdscr.addstr(max_y - padding -1, padding, "Press any key to return.", curses.color_pair(3))
         stdscr.noutrefresh()
         curses.doupdate()
         stdscr.getch()
-        return
-
-    playlist_uri = playlist_info.get('uri')
+        try:
+            if 'header_win' in locals() and header_win: header_win.clear(); del header_win
+            if 'body_win' in locals() and body_win: body_win.clear(); del body_win
+        except NameError: pass
+        stdscr.clear()
+        stdscr.refresh()
+        return True
 
     try:
-        if track_uri_chunks and track_uri_chunks[0]:
-             first_track_uri = track_uri_chunks[0][0]
-             if playlist_uri and first_track_uri:
-                  sp.start_playback(
-                     device_id=device_id,
-                     context_uri=playlist_uri,
-                     offset={'uri': first_track_uri},
-                  )
-                  logging.info(f"Started playback for playlist {playlist_uri} from track {first_track_uri}.")
-             else:
-                  sp.start_playback(device_id=device_id, uris=track_uri_chunks[0])
-                  logging.info(f"Started playback for a chunk of {len(track_uri_chunks[0])} tracks using uris.")
-        else:
-            raise ValueError("No valid track URIs available to start playback.")
+        sp_client.start_playback(
+            device_id=device_id,
+            context_uri=playlist_uri,
+            offset={'uri': first_track_uri},
+        )
+        logging.info(f"Started playback for playlist {playlist_uri} from track {first_track_uri}.")
+        time.sleep(1)
 
     except spotipy.exceptions.SpotifyException as e:
         logging.error(f"SpotifyException starting playback: {e}", exc_info=True)
         body_win.addstr(0, 0, "Failed to start playback (Spotify API Error).", curses.color_pair(6))
         body_win.addstr(1, 0, truncate_text(str(e), usable_x -1), curses.color_pair(6))
-        body_win.addstr(2, 0, "Check device status or Premium account.", curses.color_pair(3))
+        body_win.addstr(2, 0, "Check device status, Premium account, or playlist validity.", curses.color_pair(3))
         body_win.noutrefresh()
         stdscr.addstr(max_y - padding -1, padding, "Press any key to return.", curses.color_pair(3))
         stdscr.noutrefresh()
         curses.doupdate()
         stdscr.getch()
-        return
+        try:
+            if 'header_win' in locals() and header_win: header_win.clear(); del header_win
+            if 'body_win' in locals() and body_win: body_win.clear(); del body_win
+        except NameError: pass
+        stdscr.clear()
+        stdscr.refresh()
+        return True
     except Exception as e:
-        logging.error(f"Error starting playback: {e}", exc_info=True)
+        logging.error(f"Unexpected error starting playback: {e}", exc_info=True)
         body_win.addstr(0, 0, "Failed to start playback (Unexpected Error).", curses.color_pair(6))
         body_win.addstr(1, 0, truncate_text(str(e), usable_x -1), curses.color_pair(6))
         body_win.addstr(2, 0, "Note: Playback control requires a Spotify Premium account.", curses.color_pair(3))
@@ -394,384 +934,567 @@ def playback_curses(stdscr, sp, playlist_info, tracks, device_id):
         stdscr.noutrefresh()
         curses.doupdate()
         stdscr.getch()
-        return
+        try:
+            if 'header_win' in locals() and header_win: header_win.clear(); del header_win
+            if 'body_win' in locals() and body_win: body_win.clear(); del body_win
+        except NameError: pass
+        stdscr.clear()
+        stdscr.refresh()
+        return True
 
 
-    shuffle_state = False
-    try:
-        current_playback_state_init = sp.current_playback(market='from_token')
-        if current_playback_state_init is not None and "shuffle_state" in current_playback_state_init:
-            shuffle_state = current_playback_state_init["shuffle_state"]
-            logging.info(f"Initial shuffle state from API: {shuffle_state}")
-
-    except Exception as e:
-        logging.warning(f"Could not get initial shuffle state: {e}")
-        shuffle_state = False
-
-    cached_track_info = None
-    cached_shuffle_state = shuffle_state
-    cached_is_playing = False
-    cached_max_x = max_x
-    cached_max_y = max_y
+    cached_playback_state = None
     last_api_error = None
 
     needs_redraw = True
-    last_poll_time = time.time()
+    last_poll_time = 0
     POLLING_INTERVAL = 2.0
+    current_volume_percent = None
+    try:
+        initial_state = sp_client.current_playback(market='from_token')
+        if initial_state and initial_state.get("device", {}).get("id") == device_id and initial_state.get("device", {}).get("supports_volume"):
+             current_volume_percent = initial_state["device"].get("volume_percent")
+             logging.debug(f"Got initial volume: {current_volume_percent}%")
+        elif selected_device.get("supports_volume"):
+             try:
+                  devices = sp_client.devices().get("devices", [])
+                  selected_device_info = next((d for d in devices if d.get("id") == device_id), None)
+                  if selected_device_info and selected_device_info.get("supports_volume"):
+                       current_volume_percent = selected_device_info.get("volume_percent")
+                       logging.debug(f"Got initial volume from devices list: {current_volume_percent}%")
+             except Exception as e:
+                  logging.debug(f"Could not get initial volume from devices list: {e}")
+
+
+    except Exception as e:
+         logging.debug(f"Could not get initial playback state or volume: {e}")
+
 
     running = True
-    while running:
-        current_max_y, current_max_x = stdscr.getmaxyx()
-        size_changed = (current_max_y != cached_max_y or current_max_x != cached_max_x)
+    exit_program = False
 
-        if size_changed:
-            cached_max_y, cached_max_x = current_max_y, current_max_x
-            if cached_max_y < min_y or cached_max_x < min_x:
-                curses.endwin()
-                print(f"Error: Terminal resized too small. Needs at least {min_y}x{min_x}. Current size: {cached_max_y}x{cached_max_x}")
-                sys.exit(1)
+    try:
+        while running:
+            current_max_y, current_max_x = stdscr.getmaxyx()
+            size_changed = (current_max_y != max_y or current_max_x != max_x)
 
-            try:
-                del header_win
-                del body_win
-                del command_win
-            except NameError:
-                pass
-
-            usable_y = cached_max_y - (padding * 2)
-            usable_x = cached_max_x - (padding * 2)
-            body_h = usable_y - header_h - command_h - 1
-
-            if body_h < min_body_h_required:
-                 curses.endwin()
-                 print(f"Error: Terminal height too small after resize. Needs at least {min_body_h_required + header_h + command_h + padding*2 + 1} lines total. Current size: {cached_max_y}x{cached_max_x}")
-                 sys.exit(1)
-
-            header_win = curses.newwin(header_h, usable_x, padding, padding)
-            body_win = curses.newwin(body_h, usable_x, padding + header_h + 1, padding)
-            command_win = curses.newwin(command_h, usable_x, cached_max_y - padding - command_h, padding)
-
-            stdscr.clear()
-            stdscr.bkgd(' ', curses.color_pair(1))
-            stdscr.touchwin()
-
-            needs_redraw = True
-
-        current_time = time.time()
-        poll_needed = (current_time - last_poll_time >= POLLING_INTERVAL) or needs_redraw
-
-        current_playback_state = None
-        if poll_needed:
-            try:
-                current_playback_state = sp.current_playback(market='from_token')
-                last_poll_time = current_time
-                if current_playback_state is not None:
-                     last_api_error = None
-
-                new_track_info = current_playback_state.get("item") if current_playback_state else None
-                new_shuffle_state = current_playback_state.get("shuffle_state", False) if current_playback_state else cached_shuffle_state
-                new_is_playing = current_playback_state.get("is_playing", False) if current_playback_state else cached_is_playing
-
-                if new_track_info != cached_track_info or new_shuffle_state != cached_shuffle_state or new_is_playing != cached_is_playing or (last_api_error is not None):
-                    needs_redraw = True
-                    cached_track_info = new_track_info
-                    cached_shuffle_state = new_shuffle_state
-                    cached_is_playing = new_is_playing
-
-
-            except Exception as e:
-                logging.error(f"Error fetching playback state: {e}", exc_info=True)
-                last_api_error = f"API Error: {truncate_text(str(e), usable_x - 15)}"
-                needs_redraw = True
-
-        key = stdscr.getch()
-
-        if key != -1:
-            key_handled = True
-
-            if key in (ord("q"), ord("Q"), 27):
-                running = False
-
-            elif key in (ord("p"), ord("P")):
-                try:
-                    current_status_check = sp.current_playback(market='from_token')
-                    if current_status_check is not None and current_status_check.get("is_playing"):
-                        sp.pause_playback(device_id=device_id)
-                        logging.info("Playback paused.")
-                    else:
-                        sp.start_playback(device_id=device_id)
-                        logging.info("Started/resumed playback.")
-
-                    last_poll_time = 0
-                    needs_redraw = True
-                    last_api_error = None
-
-                except Exception as e:
-                    logging.error(f"Error toggling playback: {e}", exc_info=True)
-                    last_api_error = f"Cmd Error: {truncate_text(str(e), usable_x - 15)}"
-                    needs_redraw = True
-
-            elif key in (ord(">"), ord(".")):
-                try:
-                    sp.next_track(device_id=device_id)
-                    logging.info("Skipped to next track.")
-                    cached_track_info = None
-                    last_poll_time = 0
-                    needs_redraw = True
-                    last_api_error = None
-                except Exception as e:
-                    logging.error(f"Error skipping to next track: {e}", exc_info=True)
-                    last_api_error = f"Cmd Error: {truncate_text(str(e), usable_x - 15)}"
-                    needs_redraw = True
-
-            elif key in (ord("<"), ord(",")):
-                try:
-                    sp.previous_track(device_id=device_id)
-                    logging.info("Skipped to previous track.")
-                    cached_track_info = None
-                    last_poll_time = 0
-                    needs_redraw = True
-                    last_api_error = None
-                except Exception as e:
-                    logging.error(f"Error returning to previous track: {e}", exc_info=True)
-                    last_api_error = f"Cmd Error: {truncate_text(str(e), usable_x - 15)}"
-                    needs_redraw = True
-
-            elif key in (ord("s"), ord("S")):
-                try:
-                    current_playback_state_check = sp.current_playback(market='from_token')
-                    current_shuffle = cached_shuffle_state
-                    if current_playback_state_check is not None and "shuffle_state" in current_playback_state_check:
-                         current_shuffle = current_playback_state_check["shuffle_state"]
-
-                    new_shuffle_state = not current_shuffle if current_shuffle is not None else True
-
-                    sp.shuffle(state=new_shuffle_state, device_id=device_id)
-                    logging.info(f"Shuffle set to {new_shuffle_state}.")
-                    time.sleep(0.1)
-                    cached_shuffle_state = new_shuffle_state
-
-                    last_poll_time = 0
-                    needs_redraw = True
-                    last_api_error = None
-
-                except Exception as e:
-                    logging.error(f"Error toggling shuffle: {e}", exc_info=True)
-                    last_api_error = f"Cmd Error: {truncate_text(str(e), usable_x - 15)}"
-                    needs_redraw = True
-
-            elif key in (ord("x"), ord("X")):
-                 try:
-                    current_playback_state_exit = sp.current_playback(market='from_token')
-                    if current_playback_state_exit and current_playback_state_exit.get("device"):
-                         sp.pause_playback(device_id=current_playback_state_exit["device"]["id"])
-                         logging.info("Playback paused due to X key exit")
-                    elif device_id:
-                         try:
-                              sp.pause_playback(device_id=device_id)
-                              logging.info(f"Attempted pause on selected device {device_id} due to X key exit.")
-                         except Exception as e:
-                              logging.warning(f"Could not pause playback on selected device {device_id} on X key exit: {e}")
-
-                 except Exception as e:
-                     logging.warning(f"Could not pause playback on X key exit: {e}")
-
-                 running = False
-
-            if key_handled:
-                pass
-
-        if needs_redraw:
             if size_changed:
+                max_y, max_x = current_max_y, current_max_x
+                usable_y = max_y - (padding * 2)
+                usable_x = max_x - (padding * 2)
+                body_h = usable_y - header_h - 1
+
+                min_required_y = header_h + 1 + min_body_h_required + 1 + padding
+                if max_y < min_required_y or body_h < min_body_h_required:
+                    raise ValueError(f"Terminal resized too small. Needs at least {min_required_y} lines total. Current size: {max_y}x{max_x}")
+
+                try:
+                    if 'header_win' in locals() and header_win: header_win.clear(); del header_win
+                    if 'body_win' in locals() and body_win: body_win.clear(); del body_win
+                except NameError: pass
+                except Exception as e: logging.warning(f"Error deleting old windows during resize: {e}", exc_info=True)
+
+                try:
+                    header_win = curses.newwin(header_h, usable_x, padding, padding)
+                    body_win = curses.newwin(body_h, usable_x, padding + header_h + 1, padding)
+                except curses.error as e:
+                    logging.error(f"Failed to create curses windows: {e}", exc_info=True)
+                    raise ValueError(f"Failed to resize UI windows: {e}") from e
+
                 stdscr.clear()
                 stdscr.bkgd(' ', curses.color_pair(1))
                 stdscr.touchwin()
+                needs_redraw = True
 
-            header_win.clear()
-            body_win.clear()
-            command_win.clear()
+            current_time = time.time()
+            poll_needed = (current_time - last_poll_time >= POLLING_INTERVAL) or needs_redraw
 
-            header = "- Spotify Playlist Player"
-            header_win.addstr(0, 0, truncate_text(header, usable_x), curses.color_pair(5) | curses.A_BOLD)
-            header_win.noutrefresh()
+            if poll_needed:
+                try:
+                    new_playback_state = sp_client.current_playback(market='from_token')
+                    last_poll_time = current_time
 
-            if playlist_info:
-                plist_line = f"{playlist_info['name']} by {playlist_info['owner']['display_name']}"
-                body_win.addstr(0, 0, "Playlist: ", curses.color_pair(3))
-                body_win.addstr(truncate_text(plist_line, usable_x - len("Playlist: ")), curses.color_pair(2))
+                    state_changed = (new_playback_state != cached_playback_state)
+                    if state_changed:
+                        needs_redraw = True
+                        cached_playback_state = new_playback_state
+                        last_api_error = None
 
-            display_track_info = current_playback_state.get("item") if current_playback_state else cached_track_info
-            display_is_playing = current_playback_state.get("is_playing", False) if current_playback_state else cached_is_playing
-            display_shuffle_state = current_playback_state.get("shuffle_state", False) if current_playback_state else cached_shuffle_state
+                        if cached_playback_state and cached_playback_state.get("device", {}).get("id") == device_id and cached_playback_state.get("device", {}).get("supports_volume"):
+                            new_volume = cached_playback_state["device"].get("volume_percent")
+                            if new_volume is not None and new_volume != current_volume_percent:
+                                logging.debug(f"Volume updated via API state: {new_volume}%")
+                                current_volume_percent = new_volume
 
-            if display_track_info:
-                item = display_track_info
-                track_name = item.get("name", "Unknown Track")
-                artists = ", ".join([a["name"] for a in item.get("artists", [])]) if item.get("artists") else "Unknown Artist"
-                album = item.get("album", {}).get("name", "Unknown Album")
-                release_date = item.get("album", {}).get("release_date", "----")
-                album_year = release_date[:4] if release_date and (release_date.startswith('2') or release_date.startswith('1')) else "----"
-                album_line = f"{album} ({album_year})"
 
-                info_start_row = 2
+                except Exception as e:
+                    logging.error(f"Error fetching playback state: {e}", exc_info=True)
+                    last_api_error = f"API Error: {truncate_text(str(e), usable_x - 15)}"
+                    needs_redraw = True
 
-                display_lines = [
-                    ("Track: ", track_name, info_start_row, 2),
-                    ("Artist: ", artists, info_start_row + 1, 4),
-                    ("Album: ", album_line, info_start_row + 2, 1),
-                ]
+            key = stdscr.getch()
 
-                labels = [line[0] for line in display_lines]
+            if key != -1:
+
+                if key == ord('?'):
+                    commands_list = [
+                        ("Enter/P", "play/pause"),
+                        ("h/Left Arrow", "prev track"),
+                        ("l/Right Arrow", "next track"),
+                        ("j/Down Arrow", "volume down"),
+                        ("k/Up Arrow", "volume up"),
+                        ("S", "shuffle toggle"),
+                        ("ESC/q", "back to search"),
+                        ("X", "exit program"),
+                    ]
+                    display_commands_popup(stdscr, commands_list, "Playback Commands")
+                    needs_redraw = True
+
+                elif key in (ord("q"), ord("Q"), 27):
+                    logging.info("Exiting playback UI via q, Q, or ESC. Attempting to pause playback.")
+                    try:
+                        pause_device_id = cached_playback_state.get("device", {}).get("id") if cached_playback_state and cached_playback_state.get("device") else selected_device['id']
+                        if pause_device_id:
+                             if cached_playback_state is None or cached_playback_state.get("is_playing", True):
+                                 sp_client.pause_playback(device_id=pause_device_id)
+                                 logging.info(f"Playback paused on device {pause_device_id} on UI exit.")
+                             else:
+                                 logging.debug("Playback was already paused, no need to pause on UI exit.")
+                        else:
+                             logging.warning("Could not determine device to pause on UI exit.")
+                    except Exception as e:
+                        logging.warning(f"Could not pause playback on UI exit: {e}")
+
+                    running = False
+
+                elif key in (ord('\n'), ord('\r'), curses.KEY_ENTER, ord("p"), ord("P")):
+                     try:
+                         is_currently_playing = cached_playback_state.get("is_playing") if cached_playback_state else False
+                         target_device_id = cached_playback_state.get("device", {}).get("id") if cached_playback_state and cached_playback_state.get("device") else selected_device['id']
+
+                         if is_currently_playing:
+                             sp_client.pause_playback(device_id=target_device_id)
+                             logging.info("Playback paused.")
+                         else:
+                             sp_client.start_playback(device_id=target_device_id)
+                             logging.info("Started/resumed playback.")
+
+                         last_poll_time = 0; cached_playback_state = None; needs_redraw = True; last_api_error = None
+
+                     except Exception as e:
+                         logging.error(f"Error toggling playback: {e}", exc_info=True)
+                         last_api_error = f"Cmd Error: {truncate_text(str(e), usable_x - 15)}"
+                         needs_redraw = True
+
+
+                elif key in (curses.KEY_RIGHT, ord('l'), ord('L')):
+                    try:
+                        target_device_id = cached_playback_state.get("device", {}).get("id") if cached_playback_state and cached_playback_state.get("device") else selected_device['id']
+                        sp_client.next_track(device_id=target_device_id)
+                        logging.info("Skipped to next track.")
+                        last_poll_time = 0; cached_playback_state = None; needs_redraw = True; last_api_error = None
+                    except Exception as e:
+                        logging.error(f"Error skipping to next track: {e}", exc_info=True)
+                        last_api_error = f"Cmd Error: {truncate_text(str(e), usable_x - 15)}"
+                        needs_redraw = True
+
+                elif key in (curses.KEY_LEFT, ord('h'), ord('H')):
+                    try:
+                        target_device_id = cached_playback_state.get("device", {}).get("id") if cached_playback_state and cached_playback_state.get("device") else selected_device['id']
+                        sp_client.previous_track(device_id=target_device_id)
+                        logging.info("Skipped to previous track.")
+                        last_poll_time = 0; cached_playback_state = None; needs_redraw = True; last_api_error = None
+                    except Exception as e:
+                        logging.error(f"Error returning to previous track: {e}", exc_info=True)
+                        last_api_error = f"Cmd Error: {truncate_text(str(e), usable_x - 15)}"
+                        needs_redraw = True
+
+                elif key in (curses.KEY_UP, ord('k'), ord('K')):
+                     if device_supports_volume:
+                          if current_volume_percent is None:
+                               logging.debug("Volume up received but current_volume_percent is None, forcing poll.")
+                               last_poll_time = 0; needs_redraw = True
+                          else:
+                              try:
+                                  new_volume = min(100, current_volume_percent + 5)
+                                  sp_client.volume(new_volume, device_id=device_id)
+                                  logging.info(f"Increased volume to {new_volume}%.")
+                                  current_volume_percent = new_volume
+                                  last_poll_time = 0; needs_redraw = True; last_api_error = None
+                              except Exception as e:
+                                   logging.error(f"Error increasing volume: {e}", exc_info=True)
+                                   last_api_error = f"Vol Up Error: {truncate_text(str(e), usable_x - 20)}"
+                                   needs_redraw = True
+                     else:
+                          logging.debug("Volume up ignored: device does not support volume control.")
+                          last_api_error = f"Device does not support volume control."
+                          needs_redraw = True
+
+                elif key in (curses.KEY_DOWN, ord('j'), ord('J')):
+                     if device_supports_volume:
+                          if current_volume_percent is None:
+                               logging.debug("Volume down received but current_volume_percent is None, forcing poll.")
+                               last_poll_time = 0; needs_redraw = True
+                          else:
+                              try:
+                                  new_volume = max(0, current_volume_percent - 5)
+                                  sp_client.volume(new_volume, device_id=device_id)
+                                  logging.info(f"Decreased volume to {new_volume}%.")
+                                  current_volume_percent = new_volume
+                                  last_poll_time = 0; needs_redraw = True; last_api_error = None
+                              except Exception as e:
+                                   logging.error(f"Error decreasing volume: {e}", exc_info=True)
+                                   last_api_error = f"Vol Down Error: {truncate_text(str(e), usable_x - 20)}"
+                                   needs_redraw = True
+                     else:
+                          logging.debug("Volume down ignored: device does not support volume control.")
+                          last_api_error = f"Device does not support volume control."
+                          needs_redraw = True
+
+
+                elif key in (ord("s"), ord("S")):
+                    try:
+                        target_device_id = cached_playback_state.get("device", {}).get("id") if cached_playback_state and cached_playback_state.get("device") else selected_device['id']
+                        current_shuffle = cached_playback_state.get("shuffle_state", False) if cached_playback_state else False
+                        new_shuffle_state = not current_shuffle
+                        sp_client.shuffle(state=new_shuffle_state, device_id=target_device_id)
+                        logging.info(f"Shuffle set to {new_shuffle_state}.")
+                        time.sleep(0.1); last_poll_time = 0; cached_playback_state = None; needs_redraw = True; last_api_error = None
+                    except Exception as e:
+                        logging.error(f"Error toggling shuffle: {e}", exc_info=True)
+                        last_api_error = f"Cmd Error: {truncate_text(str(e), usable_x - 15)}"
+                        needs_redraw = True
+
+                elif key in (ord("x"), ord("X")):
+                     logging.info("Exiting program via X. Attempting to pause playback.")
+                     try:
+                        pause_device_id = cached_playback_state.get("device", {}).get("id") if cached_playback_state and cached_playback_state.get("device") else selected_device['id']
+                        if pause_device_id:
+                             sp_client.pause_playback(device_id=pause_device_id)
+                             logging.info(f"Playback paused on device {pause_device_id} due to X key exit.")
+                        else:
+                             logging.warning("Could not determine device to pause on X key exit.")
+                     except Exception as e:
+                         logging.warning(f"Could not pause playback on X key exit: {e}")
+
+                     running = False
+                     exit_program = True
+
+
+            if needs_redraw:
+                header_win.clear(); body_win.clear()
+
+                header = "- Spotify Playlist Player"
+                header_win.addstr(0, 0, truncate_text(header, usable_x), curses.color_pair(5) | curses.A_BOLD)
+                header_win.noutrefresh()
+
+                item_display_data = []
+
+                if playlist_info:
+                    item_display_data.append((
+                        "Playlist:",
+                        f"{playlist_info['name']} by {playlist_info['owner']['display_name']}",
+                        0,
+                        2
+                    ))
+
+                item_display_data.append((
+                    "Device:",
+                    device_name,
+                    1,
+                    1
+                ))
+
+                display_playback_state = cached_playback_state if cached_playback_state else {}
+                display_track_info = display_playback_state.get("item")
+
+                if display_track_info:
+                    item = display_track_info
+                    track_name = item.get("name", "Unknown Track")
+                    artists = ", ".join([a.get("name", "Unknown Artist") for a in item.get("artists", [])]) if item.get("artists") else "Unknown Artist"
+                    album = item.get("album", {}).get("name", "Unknown Album")
+                    release_date = item.get("album", {}).get("release_date", "----")
+                    album_year = release_date[:4] if release_date and release_date[:4].isdigit() else "----"
+                    album_line = f"{album} ({album_year})"
+
+                    item_display_data.extend([
+                        ("Track:", track_name, 3, 2),
+                        ("Artist:", artists, 4, 4),
+                        ("Album:", album_line, 5, 1),
+                    ])
+
+                    status_row_in_body = 7
+
+
+                else:
+                    waiting_message_start_col_in_body = 0
+                    body_win.addstr(3, waiting_message_start_col_in_body, truncate_text("Waiting for playback info...", usable_x - waiting_message_start_col_in_body), curses.color_pair(3))
+                    if cached_playback_state is None:
+                        body_win.addstr(4, waiting_message_start_col_in_body, truncate_text("Attempting to fetch playback state...", usable_x - waiting_message_start_col_in_body), curses.color_pair(3))
+                        body_win.addstr(5, waiting_message_start_col_in_body, truncate_text("Ensure a device is active and playing.", usable_x - waiting_message_start_col_in_body), curses.color_pair(3))
+                    else:
+                        body_win.addstr(4, waiting_message_start_col_in_body, truncate_text("Playback currently stopped or no track loaded.", usable_x - waiting_message_start_col_in_body), curses.color_pair(3))
+                        current_active_device_name = display_playback_state.get("device", {}).get("name")
+                        if current_active_device_name:
+                             body_win.addstr(5, waiting_message_start_col_in_body, truncate_text(f"Currently Active Device: {current_active_device_name}", usable_x - waiting_message_start_col_in_body), curses.color_pair(3))
+
+                    status_row_in_body = 7
+
+
+                labels = [label for label, _, _, _ in item_display_data]
                 max_label_len = max(len(label) for label in labels) if labels else 0
 
-                for label, content, row, color in display_lines:
-                    content_start_col = max_label_len + 1
-                    content_max_width = usable_x - content_start_col - 1
-                    if content_max_width < 0: content_max_width = 0
+                content_start_col_in_body = max_label_len + 2
+                max_content_start_col = usable_x // 3
+                content_start_col_in_body = min(content_start_col_in_body, max_content_start_col)
+                if content_start_col_in_body < 1: content_start_col_in_body = 1
 
-                    body_win.addstr(row, 0, label, curses.color_pair(3))
-                    body_win.addstr(row, content_start_col, truncate_text(content, content_max_width), curses.color_pair(color))
 
-                status_row = info_start_row + 4
-                if status_row < body_h:
+                for label, content, row_in_body, color in item_display_data:
+                    if row_in_body < body_h:
+                        label_col_end = content_start_col_in_body - 1
+                        label_start_col_in_body = label_col_end - len(label)
+                        label_start_col_in_body = max(0, label_start_col_in_body)
+
+
+                        body_win.addstr(row_in_body, label_start_col_in_body, label, curses.color_pair(3))
+
+                        content_max_width = usable_x - content_start_col_in_body - 1
+                        if content_max_width < 0: content_max_width = 0
+
+                        body_win.addstr(row_in_body, content_start_col_in_body, truncate_text(content, content_max_width), curses.color_pair(color))
+
+
+                separator_row_in_body = 2
+                if separator_row_in_body < body_h:
+                     body_win.hline(separator_row_in_body, 0, curses.ACS_HLINE, usable_x)
+
+
+                display_is_playing = display_playback_state.get("is_playing", False)
+                display_shuffle_state = display_playback_state.get("shuffle_state", False)
+                display_volume_percent = cached_playback_state.get("device", {}).get("volume_percent") if cached_playback_state and cached_playback_state.get("device", {}).get("supports_volume") else None
+
+                if status_row_in_body < body_h:
                     play_status = "▶ Playing" if display_is_playing else "⏸ Paused"
                     status_color = 7 if display_is_playing else 6
-                    body_win.addstr(status_row, 0, play_status, curses.color_pair(status_color))
+                    body_win.addstr(status_row_in_body, 0, play_status, curses.color_pair(status_color))
 
-                    shuffle_text = "☯ Shuffle:On" if display_shuffle_state else "➡ Shuffle:Off"
+                    shuffle_text = "Shuffle: On" if display_shuffle_state else "Shuffle:Off"
                     shuffle_color = 7 if display_shuffle_state else 3
-                    shuffle_col = len(play_status) + 3
-                    if shuffle_col < usable_x:
-                         body_win.addstr(status_row, shuffle_col, shuffle_text, curses.color_pair(shuffle_color))
+                    shuffle_col_in_body = len(play_status) + 3
+                    if shuffle_col_in_body < usable_x:
+                         body_win.addstr(status_row_in_body, shuffle_col_in_body, truncate_text(shuffle_text, usable_x - shuffle_col_in_body - 1), curses.color_pair(shuffle_color))
 
-            else:
-                body_win.addstr(3, 0, "Waiting for playback info...", curses.color_pair(3))
-                body_win.addstr(4, 0, "Make sure a device is active and playing.", curses.color_pair(3))
-
-            if last_api_error:
-                 error_row = body_h - 1
-                 if error_row >= 0:
-                      body_win.clrtoeol()
-                      body_win.addstr(error_row, 0, truncate_text(last_api_error, usable_x - 1), curses.color_pair(6))
-
-            body_win.noutrefresh()
-            command_win.clear()
-
-            commands = [
-                ("P", "play/pause"),
-                ("<", "prev"),
-                (">", "next"),
-                ("ESC", "back"),
-                ("S", "shaffle"),
-                ("X", "exit"),
-            ]
-
-            cmd_str_parts = [f"{key}:{action}" for key, action in commands]
-            cmd_str = "  ".join(cmd_str_parts)
-            command_win.addstr(0, 0, truncate_text(cmd_str, usable_x - 1), curses.color_pair(3))
-            command_win.noutrefresh()
-
-            curses.doupdate()
-
-            needs_redraw = False
-
-        time.sleep(POLLING_INTERVAL)
-
-    try:
-        current_playback_state_exit = sp.current_playback(market='from_token')
-        if current_playback_state_exit and current_playback_state_exit.get("device"):
-             sp.pause_playback(device_id=current_playback_state_exit["device"]["id"])
-             logging.info("Playback paused on exit")
-        elif device_id:
-             try:
-                  sp.pause_playback(device_id=device_id)
-                  logging.info(f"Attempted pause on selected device {device_id} on exit.")
-             except Exception as e:
-                  logging.warning(f"Could not pause playback on selected device {device_id} on exit: {e}")
-
-    except Exception as e:
-        logging.warning(f"Could not pause playback on exit: {e}")
+                    if device_supports_volume:
+                         volume_text = f"Volume: {display_volume_percent}%" if display_volume_percent is not None else "Volume: N/A"
+                         volume_col_in_body = shuffle_col_in_body + len(truncate_text(shuffle_text, usable_x - shuffle_col_in_body - 1)) + 3
+                         if volume_col_in_body < usable_x:
+                              body_win.addstr(status_row_in_body, volume_col_in_body, truncate_text(volume_text, usable_x - volume_col_in_body - 1), curses.color_pair(3))
 
 
-def process_playlist(playlist):
-    clear_screen()
-    print(f"Selected Playlist: {playlist['name']} by {playlist['owner']['display_name']}")
+                else:
+                    waiting_message_start_col_in_body = 0
+                    body_win.addstr(3, waiting_message_start_col_in_body, truncate_text("Waiting for playback info...", usable_x - waiting_message_start_col_in_body), curses.color_pair(3))
+                    if cached_playback_state is None:
+                        body_win.addstr(4, waiting_message_start_col_in_body, truncate_text("Attempting to fetch playback state...", usable_x - waiting_message_start_col_in_body), curses.color_pair(3))
+                        body_win.addstr(5, waiting_message_start_col_in_body, truncate_text("Ensure a device is active and playing.", usable_x - waiting_message_start_col_in_body), curses.color_pair(3))
+                    else:
+                        body_win.addstr(4, waiting_message_start_col_in_body, truncate_text("Playback currently stopped or no track loaded.", usable_x - waiting_message_start_col_in_body), curses.color_pair(3))
+                        current_active_device_name = display_playback_state.get("device", {}).get("name")
+                        if current_active_device_name:
+                             body_win.addstr(5, waiting_message_start_col_in_body, truncate_text(f"Currently Active Device: {current_active_device_name}", usable_x - waiting_message_start_col_in_body), curses.color_pair(3))
 
-    total_tracks = playlist.get("tracks", {}).get("total", "N/A")
-    print(f"Fetching {total_tracks} tracks...")
 
-    tracks = get_all_playlist_tracks(playlist["id"])
-    if not tracks:
-        print("No playable tracks found in the selected playlist.")
-        return
+                error_row_in_body = body_h - 1
+                min_content_rows = 3
+                min_status_rows = 1
+                min_info_space = max(min_content_rows + min_status_rows + 1, 4)
+                min_error_row_needed_in_body = status_row_in_body + 1
 
-    print(f"Successfully fetched {len(tracks)} playable tracks.")
-    print("Selecting a device...")
+                if error_row_in_body >= max(0, min_error_row_needed_in_body) and error_row_in_body >= 0:
+                     if last_api_error:
+                          body_win.clrtoeol()
+                          body_win.addstr(error_row_in_body, 0, truncate_text(last_api_error, usable_x - 1), curses.color_pair(6))
+                     else:
+                          body_win.move(error_row_in_body, 0)
+                          body_win.clrtoeol()
 
-    device_id = select_device()
-    if not device_id:
-        print("No device selected. Returning to search menu.")
-        return
 
-    print("\nStarting playback. Entering playback control mode (Curses UI)...")
+                body_win.noutrefresh()
 
-    try:
-        curses.wrapper(playback_curses, sp, playlist, tracks, device_id)
-        print("\nPlayback session ended.")
+                commands_hint_line = "Press '?' for commands."
+                stdscr.addstr(max_y - 1, padding, truncate_text(commands_hint_line, max_x - 2*padding), curses.color_pair(3))
+                stdscr.clrtoeol()
+
+
+                curses.doupdate()
+
+                needs_redraw = False
 
     except Exception as e:
+         logging.error(f"Unhandled error inside playback_curses: {e}", exc_info=True)
+         raise
+
+    finally:
+        logging.debug("Cleaning up windows in playback_curses finally block")
         try:
-             curses.endwin()
-        except:
-             pass
+            if 'header_win' in locals() and header_win: header_win.clear(); del header_win
+            if 'body_win' in locals() and body_win: body_win.clear(); del body_win
+        except NameError: pass
+        except Exception as e: logging.warning(f"Error cleaning up windows in playback_curses finally: {e}", exc_info=True)
 
-        logging.error(f"Error during playback (curses mode): {e}", exc_info=True)
-        print(f"\nAn error occurred during playback: {e}")
-        print("Exiting playback mode.")
+        try:
+             stdscr.clear()
+             stdscr.refresh()
+             logging.debug("stdscr cleared and refreshed in playback_curses finally")
+        except Exception as e:
+             logging.warning(f"Failed to clear/refresh stdscr in playback_curses finally: {e}", exc_info=True)
+
+    return not exit_program
+
+
+def cleanup_playback(sp_client):
+    """Attempts to pause the current playback."""
+    logging.info("Attempting to pause playback during cleanup.")
+    try:
+        current_playback_state = sp_client.current_playback(market='from_token')
+        if current_playback_state and current_playback_state.get("device") and current_playback_state.get("is_playing"):
+            device_id = current_playback_state["device"]["id"]
+            sp_client.pause_playback(device_id=device_id)
+            logging.info(f"Playback paused on device {device_id}.")
+        else:
+            logging.info("No active playback state found to pause.")
+    except Exception as e:
+        logging.warning(f"Could not pause playback during cleanup: {e}", exc_info=True)
 
 
 def main():
+    """Main function to run the Spotify playlist player."""
+    clear_screen()
+    print("Starting Spotify Playlist Player...")
+    time.sleep(1)
+
     try:
-        clear_screen()
         while True:
             query = get_search_query()
 
             if query is None:
-                 print("Input error, please try again.")
-                 continue
-            if not query.strip():
+                 clear_screen()
+                 print(" see you :)")
+                 break
+            if not query:
                 print("Search query cannot be empty.")
+                input("Press Enter to continue...")
                 continue
 
             playlists = search_playlists(query)
 
             if not playlists:
                 print(f"No playlists found for '{query}'.")
+                input("Press Enter to continue...")
                 continue
 
-            selected_playlist = select_playlist(playlists)
+            try:
+                 selected_playlist = curses.wrapper(select_playlist_curses, playlists)
 
-            if selected_playlist:
-                process_playlist(selected_playlist)
+                 if selected_playlist is None:
+                      print("Returning to search.")
+                      continue
+
+                 print(f"Selected Playlist: {selected_playlist['name']} by {selected_playlist['owner']['display_name']}")
+
+            except ValueError as ve:
+                 clear_screen()
+                 print(f"\nError: {ve}")
+                 print("Playlist selection aborted due to terminal issue.")
+                 print("Returning to search.")
+                 input("Press Enter to continue...")
+                 continue
+            except Exception as e:
+                 clear_screen()
+                 logging.error(f"Unhandled error during playlist selection (curses): {e}", exc_info=True)
+                 print(f"\nAn unexpected error occurred during playlist selection: {e}")
+                 print("Returning to search.")
+                 input("Press Enter to continue...")
+                 continue
+
+
+            tracks = get_all_playlist_tracks(selected_playlist["id"])
+
+            if not tracks:
+                print("No playable tracks found in the selected playlist.")
+                input("Press Enter to continue...")
+                continue
+
+            print(f"Successfully fetched {len(tracks)} playable tracks.")
+
+            try:
+                 selected_device = curses.wrapper(select_device_curses)
+
+                 if selected_device is None:
+                      print("Returning to search.")
+                      continue
+
+                 print(f"Selected Device: {selected_device.get('name', 'Unknown Device')}")
+
+            except ValueError as ve:
+                 clear_screen()
+                 print(f"\nError: {ve}")
+                 print("Device selection aborted due to terminal issue.")
+                 print("Returning to search.")
+                 input("Press Enter to continue...")
+                 continue
+            except Exception as e:
+                 clear_screen()
+                 logging.error(f"Unhandled error during device selection (curses): {e}", exc_info=True)
+                 print(f"\nAn unexpected error occurred during device selection: {e}")
+                 print("Returning to search.")
+                 input("Press Enter to continue...")
+                 continue
+
+
+            try:
+                continue_main_loop = curses.wrapper(playback_curses, sp, selected_playlist, tracks, selected_device)
+
+                if not continue_main_loop:
+                     logging.info("Received signal to exit program from playback UI.")
+                     break
+
+                logging.info("Playback UI exited normally (ESC/q/Q). Returning to search.")
+
+
+            except ValueError as ve:
+                clear_screen()
+                print(f"\nError: {ve}")
+                print("Playback session aborted due to terminal issue.")
+                print("Press Enter to continue...")
+                try: input()
+                except (KeyboardInterrupt, EOFError): pass
+
+            except Exception as e:
+                clear_screen()
+                logging.error(f"Unhandled error during playback (curses mode) caught by wrapper: {e}", exc_info=True)
+                print(f"\nAn unexpected error occurred during playback: {e}")
+                print("Exiting playback mode.")
+                print("Press Enter to continue...")
+                try: input()
+                except (KeyboardInterrupt, EOFError): pass
+
 
     except KeyboardInterrupt:
-        print("\nCtrl+C detected. Exiting program.")
-        try:
-            current_playback_state = sp.current_playback(market='from_token')
-            if current_playback_state and current_playback_state.get("device"):
-                sp.pause_playback(device_id=current_playback_state["device"]["id"])
-                logging.info("Playback paused on Ctrl+C exit")
-        except Exception as e:
-            logging.warning(f"Could not pause playback on Ctrl+C exit: {e}")
+        print("\nCtrl+C detected.")
+        cleanup_playback(sp)
+        print("Exiting program.")
         sys.exit(0)
 
     except Exception as e:
-        logging.error(f"Unhandled error in main loop: {e}", exc_info=True)
-        print(f"\nAn unexpected error occurred: {e}")
+        logging.error(f"Unhandled critical error in main loop: {e}", exc_info=True)
+        print(f"\nAn unexpected critical error occurred: {e}")
+        cleanup_playback(sp)
         print("Exiting.")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
 
+# --- END OF FILE spolistplay.py ---

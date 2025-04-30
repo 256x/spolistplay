@@ -1,144 +1,165 @@
-# spolistplay: Command-Line Spotify Playlist Player
+# spolistplay
 
-[日本語版はこちら](https://github.com/256x/spolistplay/blob/main/README_ja.md)
+[Japanese Version (日本語版はこちら)](README_jp.md)
 
-`spolistplay` is a simple command-line tool written in Python that allows you to search for Spotify playlists, select one, choose a playback device, and control playback directly from your terminal using an interactive interface.
+A terminal-based Spotify playlist player using the `curses` library. Search for playlists, select one, choose an active Spotify device, and control playback directly from your terminal.
 
-**Note:** This tool requires a **Spotify Premium account** for playback control features via the API.
+Git URL: https://github.com/256x/spolistplay
+
+**❗ Important Note: Spotify Premium Required for Playback Control ❗**
+
+Full playback control features (starting/pausing playback, skipping tracks, volume control, shuffle toggle) **require a Spotify Premium account**. While the script might allow searching and listing playlists with a free account, you will likely encounter errors or limitations when trying to control playback.
 
 ## Features
 
-*   Search for Spotify playlists by keyword or list your own playlists.
-*   Select a playlist to play.
-*   Choose an available Spotify device for playback.
-*   Interactive terminal interface for playback control (Play/Pause, Next, Previous, Shuffle, Exit).
-*   Basic error handling and logging.
+*   Search for public playlists on Spotify.
+*   Fetch your own saved playlists (by searching for "0").
+*   Select playlists from search results using a `curses`-based UI.
+*   Select an active Spotify device (e.g., desktop client, web player, speaker) using a `curses`-based UI.
+*   Control playback (Requires Premium):
+    *   Play/Pause
+    *   Next/Previous Track
+    *   Volume Up/Down (if device supports it)
+    *   Toggle Shuffle
+*   View currently playing track information.
+*   Responsive `curses` UI that adapts to terminal resizing (within limits).
 
 ## Requirements
 
-*   Python 3.x
-*   A **Spotify Premium account**
-*   A running Spotify client/device logged into your account
+*   **Python:** 3.6 or higher.
+*   **pip:** Python package installer.
+*   **Spotify Account:** A Spotify account is required. **A Spotify Premium account is required** for playback control features.
+*   **Spotify API Credentials:**
+    *   Client ID
+    *   Client Secret
+    *   Redirect URI
+*   **curses library:** Standard on most Unix-like systems (Linux, macOS). For Windows, you might need to install `windows-curses`: `pip install windows-curses`. Note that Windows compatibility might vary.
 
 ## Installation
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/256x/spolistplay
+    git clone https://github.com/256x/spolistplay.git
     cd spolistplay
     ```
 
 2.  **Install dependencies:**
-    Use pip to install the required libraries.
     ```bash
     pip install -r requirements.txt
     ```
-    If you are on **Windows** and encounter issues with the terminal interface, you might need the `windows-curses` package:
-    ```bash
-    pip install windows-curses
-    ```
+    *(On Windows, you might need `pip install windows-curses` as well if it's not already handled.)*
 
-## Initial Setup (Spotify API Authentication)
+## Setup
 
-`spolistplay` uses the Spotify Web API to interact with your account. You need to create a Spotify Developer application and provide its credentials.
+### 1. Get Spotify API Credentials
 
-1.  **Go to the Spotify Developer Dashboard:**
-    Visit [https://developer.spotify.com/dashboard/applications](https://developer.spotify.com/dashboard/applications) and log in with your Spotify account.
+1.  Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/).
+2.  Log in with your Spotify account.
+3.  Create a new application (or use an existing one).
+4.  Note down the **Client ID** and **Client Secret**.
+5.  Go to the application's settings (`Edit Settings`).
+6.  Add a **Redirect URI**. A common one for local development is `http://localhost:8888/callback` or `https://127.0.0.0/`. **Important:** The URI you set here *must exactly match* the `SPOTIPY_REDIRECT_URI` environment variable you will set below. The script defaults to `https://127.0.0.0/` if the environment variable is not set.
 
-2.  **Create an Application:**
-    Click "Create app". Give it a name (e.g., "spolistplay") and a description. Agree to the terms.
+### 2. Set Environment Variables
 
-3.  **Get Client ID and Client Secret:**
-    Once the app is created, you will see its Dashboard. Your "Client ID" is visible here. Click "Show Client Secret" to reveal your secret. **Keep your Client Secret confidential.**
+Set the following environment variables in your system:
 
-4.  **Configure Redirect URIs:**
-    Click "Edit Settings". Under "Redirect URIs", add the exact URI that `spolistplay` will use. The default in the script is `https://127.0.0.1/`. You must add *this exact URI* to the list in your Spotify application settings. You can add multiple URIs if needed, but make sure the one used by the script is present.
-    *Example:* `https://127.0.0.1/`
+*   `SPOTIPY_CLIENT_ID`: Your Spotify application's Client ID.
+*   `SPOTIPY_CLIENT_SECRET`: Your Spotify application's Client Secret.
+*   `SPOTIPY_REDIRECT_URI`: The Redirect URI you set in the Spotify Developer Dashboard (e.g., `https://127.0.0.0/`).
 
-5.  **Set Environment Variables:**
-    The script reads your Client ID, Client Secret, and Redirect URI from environment variables. Set these in your terminal session before running the script.
+**Example (Linux/macOS - temporary for the current session):**
 
-    *   **Bash/Zsh (Linux, macOS):**
-        ```bash
-        export SPOTIPY_CLIENT_ID="YOUR_CLIENT_ID"
-        export SPOTIPY_CLIENT_SECRET="YOUR_CLIENT_SECRET"
-        export SPOTIPY_REDIRECT_URI="https://127.0.0.1/" # Or your chosen URI
-        ```
-    *   **PowerShell (Windows):**
-        ```powershell
-        $env:SPOTIPY_CLIENT_ID="YOUR_CLIENT_ID"
-        $env:SPOTIPY_CLIENT_SECRET="YOUR_CLIENT_SECRET"
-        $env:SPOTIPY_REDIRECT_URI="https://127.0.0.1/" # Or your chosen URI
-        ```
-    *   **Command Prompt (Windows):**
-        ```cmd
-        set SPOTIPY_CLIENT_ID="YOUR_CLIENT_ID"
-        set SPOTIPY_CLIENT_SECRET="YOUR_CLIENT_SECRET"
-        set SPOTIPY_REDIRECT_URI="https://127.0.0.1/" # Or your chosen URI
-        ```
-    *(Replace `"YOUR_CLIENT_ID"` and `"YOUR_CLIENT_SECRET"` with your actual credentials).*
+```bash
+export SPOTIPY_CLIENT_ID='your_client_id'
+export SPOTIPY_CLIENT_SECRET='your_client_secret'
+export SPOTIPY_REDIRECT_URI='https://127.0.0.0/' # Or your chosen URI
+```
 
-    For permanent setup, consider adding these lines to your shell's profile file (`~/.bashrc`, `~/.zshrc`, `~/.profile`, etc.) or setting system-wide environment variables.
+*(Add these lines to your `.bashrc`, `.zshrc`, or equivalent shell profile for permanent setup.)*
 
-6.  **First Run Authorization:**
-    The first time you run the script after setting the environment variables, it will likely open a web browser prompting you to log in to Spotify and authorize your application. After authorization, the browser will redirect to the specified Redirect URI.
+**Example (Windows - Command Prompt - temporary):**
 
-    **Manual Authorization (if automatic redirection fails):**
-    Sometimes the automatic redirection or token retrieval doesn't work. If your browser opens and redirects to `https://127.0.0.1/` (or your chosen URI) but the script doesn't proceed:
-    *   Look at the URL in your browser's address bar. It should look something like `https://127.0.0.1/?code=AQC...&state=...`.
-    *   **Copy the *entire* URL** from the browser's address bar.
-    *   Go back to your terminal where the `spolistplay.py` script is running. The script might be waiting for input, or display an error message.
-    *   **Paste the copied URL** into the terminal and press Enter. The script should now be able to retrieve the authorization token and proceed.
+```cmd
+set SPOTIPY_CLIENT_ID=your_client_id
+set SPOTIPY_CLIENT_SECRET=your_client_secret
+set SPOTIPY_REDIRECT_URI=https://127.0.0.0/
+```
 
-    Subsequent runs should use a cached token and not require browser interaction unless the token expires or the cache is invalid.
+**Example (Windows - PowerShell - temporary):**
 
-    The cache file is stored in `~/.cache/spotify/.spotify_cache`.
+```powershell
+$env:SPOTIPY_CLIENT_ID = 'your_client_id'
+$env:SPOTIPY_CLIENT_SECRET = 'your_client_secret'
+$env:SPOTIPY_REDIRECT_URI = 'https://127.0.0.0/'
+```
 
-## Usage
+*(For permanent setup on Windows, use the System Properties -> Environment Variables panel.)*
 
-1.  Make sure you have completed the initial setup and set the environment variables.
-2.  Ensure a Spotify client (desktop, mobile, web player) is running and logged into your account, and that the desired playback device is available.
-3.  Run the script from your terminal:
+### 3. First Run & Authentication
+
+1.  Run the script:
     ```bash
     python spolistplay.py
     ```
-4.  **Search or List Playlists:**
-    *   Enter a search term (e.g., "rock hits") and press Enter to search for playlists.
-    *   Enter `0` and press Enter to list your own saved playlists.
-    *   Press `ESC` during search input to exit the program.
-5.  **Select Playlist:**
-    A list of found playlists will be displayed. Enter the number corresponding to the playlist you want to play and press Enter.
-6.  **Select Device:**
-    A list of available Spotify devices will be shown. Enter the number corresponding to the device you want to play on and press Enter.
-7.  **Playback Interface:**
-    Once a playlist and device are selected, the script will switch to an interactive terminal interface showing playback information and controls.
+2.  On the first run, your web browser should open automatically, asking you to log in to Spotify and authorize the application.
+3.  After you authorize, Spotify will redirect you to the `REDIRECT_URI` you specified.
+4.  **IMPORTANT:** The script attempts to automatically capture the authentication code from the redirect. However, this might fail depending on your system setup.
+    *   **If successful:** The script will proceed after showing an "Authentication successful" message.
+    *   **If it fails:** The browser will likely show a "Cannot GET /" or similar error on the redirect page (this is normal if no local server is running). **You need to manually copy the *entire URL* from your browser's address bar** (it will look something like `https://127.0.0.0/?code=AQB...`).
+    *   Paste this full URL back into the terminal where the script is waiting for input.
+5.  Once authenticated, the script will create a cache file (`~/.cache/spotify/.spotify_cache` on Linux/macOS, similar path in user directory on Windows) so you don't have to authenticate every time.
 
-    **Playback Controls:**
+## Usage
 
-    | Key       | Action                       |
-    | :-------- | :--------------------------- |
-    | `P` or `p` | Toggle Play/Pause            |
-    | `<` or `,` | Play Previous Track          |
-    | `>` or `.` | Play Next Track              |
-    | `S` or `s` | Toggle Shuffle On/Off        |
-    | `ESC`     | Return to Playlist Search    |
-    | `X` or `x` | Exit Program (pauses playback) |
+1.  **Run the script:**
+    ```bash
+    python spolistplay.py
+    ```
 
-    The interface will periodically update to show the current track, artist, album, playback status, and shuffle state.
+2.  **Search:**
+    *   Enter a search query for playlists (e.g., "80s rock", "coding focus").
+    *   Enter `0` to fetch your own saved playlists.
+    *   Press `Enter` to search.
+    *   Press `ESC` during input to exit.
 
-## Tips & Troubleshooting
+3.  **Select Playlist:**
+    *   A list of found playlists will be displayed.
+    *   Use `Up/Down` arrows or `j/k` keys to navigate.
+    *   Use `Left/Right` arrows or `h/l` keys to change pages.
+    *   Type the number of the playlist and press `Enter` for direct selection.
+    *   Press `Enter` on the highlighted item to select.
+    *   Press `ESC` to go back to the search prompt.
+    *   Press `?` to see available commands in a popup.
 
-*   **Spotify Premium:** Playback control via the API (starting playback on a specific device, skipping, pausing, shuffling) requires Spotify Premium.
-*   **Device Not Found:** Ensure your Spotify client (desktop, mobile) is running, logged in, and visible on your network. Sometimes, you might need to start playback manually on a device once to make it discoverable by the API.
-*   **Authentication Errors:** Double-check your Client ID, Client Secret, and Redirect URI environment variables and the settings in your Spotify Developer Dashboard. Ensure the Redirect URI is *exactly* the same. Try deleting the cache file (`~/.cache/spotify/.spotify_cache`) to force re-authentication. If the browser opens but the script hangs, remember to copy the final URL from the browser and paste it into the terminal.
-*   **Terminal Compatibility:** The interactive interface uses terminal capabilities. Ensure your terminal supports basic full-screen and key input handling. If you are on Windows, installing `windows-curses` might help.
-*   **`getch` Issues:** The character input (`getch`) is implemented with basic methods. It might not work perfectly on all terminal types or configurations.
+4.  **Select Device:**
+    *   A list of your active Spotify devices will be shown.
+    *   Navigate and select similarly to the playlist selection (`Up/Down/j/k`, number + `Enter`, `Enter` on highlight).
+    *   Press `ESC` or `q` to go back to the search prompt.
+    *   Press `?` to see available commands.
+
+5.  **Playback Control (Requires Premium):**
+    *   Once a playlist and device are selected, playback starts automatically.
+    *   The screen shows current track info, playback status, etc.
+    *   **Key Commands:**
+        *   `Enter` or `p`: Play/Pause
+        *   `Right Arrow` or `l`: Next Track
+        *   `Left Arrow` or `h`: Previous Track
+        *   `Up Arrow` or `k`: Volume Up (if supported)
+        *   `Down Arrow` or `j`: Volume Down (if supported)
+        *   `s`: Toggle Shuffle
+        *   `?`: Show commands popup.
+        *   `ESC` or `q`: Stop playback and return to search.
+        *   `x`: Stop playback and exit the entire application.
+
+## Notes
+
+*   **Spotify Premium:** As mentioned above, Premium is required for controlling playback. Free accounts will have limited functionality.
+*   **Terminal Size:** The `curses` UI requires a minimum terminal size. If your terminal is too small, the script may raise an error or display incorrectly.
+*   **Windows Compatibility:** `curses` support on Windows can be less stable than on Linux/macOS. Using Windows Terminal or WSL (Windows Subsystem for Linux) might provide a better experience.
+*   **Authentication Cache:** If you encounter persistent authentication issues, try deleting the cache file (`~/.cache/spotify/.spotify_cache`) and re-authenticating.
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
-## Credits
-
-*   Uses the `spotipy` library ([https://spotipy.readthedocs.io/en/2.24.0/](https://spotipy.readthedocs.io/en/2.24.0/)) for interacting with the Spotify Web API.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
