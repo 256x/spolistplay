@@ -2,6 +2,8 @@
 
 [English Version](README.md)
 
+![spolistplay demo gif](https://github.com/user-attachments/assets/ea13c0fb-af09-48e8-9b6b-1109919e3ccf)
+
 `curses` ライブラリを使用した、ターミナルベースの Spotify プレイリストプレイヤーです。ターミナルから直接、プレイリストの検索、選択、アクティブな Spotify デバイスの選択、再生コントロールを行えます。
 
 Git URL: https://github.com/256x/spolistplay
