@@ -29,7 +29,7 @@ Git URL: https://github.com/256x/spolistplay
 ## 要件
 
 *   **Python:** 3.6 以上
-*   **pip:** Python パッケージインストーラー
+*   **pip:** Python パッケージインストーラー (または `uv`)
 *   **Spotify アカウント:** Spotify アカウントが必要です。**再生コントロール機能には Spotify Premium アカウントが必須**です。
 *   **Spotify API クレデンシャル:**
     *   クライアント ID (Client ID)
@@ -50,6 +50,21 @@ Git URL: https://github.com/256x/spolistplay
     pip install -r requirements.txt
     ```
     *(Windows では、必要に応じて `pip install windows-curses` も実行してください。)*
+
+    **`uv` を使用する場合 (高速な Python パッケージインストーラー兼リゾルバー):**
+
+    `uv` がインストールされている場合（インストール手順については [uv 公式ドキュメント](https://github.com/astral-sh/uv) を参照してください）、`uv` を使用して仮想環境を作成し、依存関係をインストールできます:
+    ```bash
+    # (任意) 仮想環境を作成してアクティベートする
+    uv venv .venv
+    source .venv/bin/activate  # Linux/macOS の場合
+    # .venv\Scripts\activate  # Windows (コマンドプロンプト) の場合
+    # .venv\Scripts\Activate.ps1 # Windows (PowerShell) の場合
+
+    # uv を使用して依存関係をインストール
+    uv pip install -r requirements.txt
+    ```
+    *(Windows で `curses` が標準で利用できない場合、`requirements.txt` で処理されない場合は `windows-curses` を別途インストールする必要があるかもしれません: `uv pip install windows-curses`)*
 
 ## セットアップ
 

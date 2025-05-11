@@ -1,8 +1,11 @@
-# Core dependency for Spotify API interaction
-spotipy
-
-# Required for the curses-based terminal interface on Windows.
-# The 'curses' module is part of the standard library on Unix-like systems
-# (Linux, macOS), but not on Windows.
-windows-curses; sys_platform == "win32"
-
+certifi==2025.1.31
+charset-normalizer==3.4.1
+click==8.1.8
+colorama==0.4.6
+idna==3.10
+keyboard==0.13.5
+pillow==11.2.1
+redis==5.2.1
+requests==2.32.3
+spotipy==2.25.1
+urllib3==2.4.0

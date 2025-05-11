@@ -28,14 +28,14 @@ Full playback control features (starting/pausing playback, skipping tracks, volu
 
 ## Requirements
 
-*   **Python:** 3.6 or higher.
-*   **pip:** Python package installer.
-*   **Spotify Account:** A Spotify account is required. **A Spotify Premium account is required** for playback control features.
-*   **Spotify API Credentials:**
-    *   Client ID
-    *   Client Secret
-    *   Redirect URI
-*   **curses library:** Standard on most Unix-like systems (Linux, macOS). For Windows, you might need to install `windows-curses`: `pip install windows-curses`. Note that Windows compatibility might vary.
+ *   **Python:** 3.6 or higher.
+ *   **pip:** Python package installer (or `uv`).
+ *   **Spotify Account:** A Spotify account is required. **A Spotify Premium account is required** for playback control features.
+ *   **Spotify API Credentials:**
+     *   Client ID
+     *   Client Secret
+     *   Redirect URI
+ *   **curses library:** Standard on most Unix-like systems (Linux, macOS). For Windows, you might need to install `windows-curses`: `pip install windows-curses` or `uv pip install windows-curses`. Note that Windows compatibility might vary.
 
 ## Installation
 
@@ -50,6 +50,20 @@ Full playback control features (starting/pausing playback, skipping tracks, volu
     pip install -r requirements.txt
     ```
     *(On Windows, you might need `pip install windows-curses` as well if it's not already handled.)*
+    **Using `uv` (a fast Python package installer and resolver):**
+
+    If you have `uv` installed (see [uv's official documentation](https://github.com/astral-sh/uv) for installation instructions), you can use it to create a virtual environment and install dependencies:
+    ```bash
+    # Optionally, create and activate a virtual environment
+    uv venv .venv
+    source .venv/bin/activate  # On Linux/macOS
+    # .venv\Scripts\activate  # On Windows (Command Prompt)
+    # .venv\Scripts\Activate.ps1 # On Windows (PowerShell)
+
+    # Install dependencies using uv
+    uv pip install -r requirements.txt
+    ```
+    *(On Windows, if `curses` is not readily available, you might also need to install `windows-curses`: `uv pip install windows-curses` if it's not handled by `requirements.txt`.)*
 
 ## Setup
 
