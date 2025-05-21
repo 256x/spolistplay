@@ -656,7 +656,7 @@ def playback_curses(stdscr, sp_client, playlist_info, tracks, selected_device):
         progress = min(progress_ms / duration_ms, 1.0)
         filled = int(bar_width * progress)
         empty = bar_width - filled
-        return f"{'*' * filled}{'-' * empty}"
+        return f"{'=' * filled}{'-' * empty}"
 
     try:
         initial_state = sp_client.current_playback(market='from_token')
