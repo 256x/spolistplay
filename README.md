@@ -146,13 +146,11 @@ $env:SPOTIPY_REDIRECT_URI = 'https://127.0.0.0/'
     *   Type the number of the playlist and press `Enter` for direct selection.
     *   Press `Enter` on the highlighted item to select.
     *   Press `ESC` to go back to the search prompt.
-    *   Press `?` to see available commands in a popup.
 
 4.  **Select Device:**
     *   A list of your active Spotify devices will be shown.
     *   Navigate and select similarly to the playlist selection (`Up/Down/j/k`, number + `Enter`, `Enter` on highlight).
     *   Press `ESC` or `q` to go back to the search prompt.
-    *   Press `?` to see available commands.
 
 5.  **Playback Control (Requires Premium):**
     *   Once a playlist and device are selected, playback starts automatically.
